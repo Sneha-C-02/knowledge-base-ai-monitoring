@@ -38,3 +38,19 @@ export interface SystemStats {
   detectedIssues: number;
   kbArticles: number;
 }
+
+export interface Pagination {
+  current_page: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  has_next_page: boolean;
+  has_previous_page: boolean;
+  next_page: number | null;
+  previous_page: number | null;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  pagination: Pagination;
+}

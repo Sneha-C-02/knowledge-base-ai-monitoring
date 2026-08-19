@@ -2,14 +2,14 @@
 
 A modern, responsive frontend application designed to provide AI-assisted technical support and proactive machine log monitoring.
 
-## Features
+##  Features
 - **Reactive Support**: Natural language query interface to search the knowledge base for instant answers and resolution steps.
 - **Proactive Log Monitoring**: Multi-file upload interface to submit machine `.log` files for AI-driven anomaly detection and health analysis.
 - **Knowledge Base**: Searchable directory of technical articles and guides.
 - **System Dashboard**: Real-time metrics, system activities, and notification feeds.
 - **Modern UI**: Clean, glassmorphism-inspired design with dynamic interactions built on Tailwind CSS.
 
-## Technology Stack
+##  Technology Stack
 - **Framework**: React 18
 - **Build Tool**: Vite
 - **Language**: TypeScript
@@ -19,7 +19,7 @@ A modern, responsive frontend application designed to provide AI-assisted techni
 
 ---
 
-## Getting Started (Local Development)
+##  Getting Started (Local Development)
 
 Follow these steps to run the frontend application on your local machine.
 
@@ -47,9 +47,16 @@ npm run dev
 ```
 The application will be available at `http://localhost:5173`.
 
+### 4. Run via Docker (Industry Standard)
+If you prefer running the frontend containerized alongside the backend:
+```bash
+docker-compose up --build
+```
+This automatically maps port `5173` and links to the backend API network.
+
 ---
 
-## Building for Production
+##  Building for Production
 
 To create an optimized production build:
 ```bash
@@ -59,7 +66,7 @@ This will compile the TypeScript code and generate static files in the `dist/` d
 
 ---
 
-## Backend Integration
+## 🔗 Backend Integration
 The frontend is built as a completely separated "Dumb UI" and relies on the backend API for all data, parsing, and AI logic.
 - Ensure your backend matches the required JSON structures and API endpoints.
 - See the `docs/` folder (specifically `BACKEND_INTEGRATION_GUIDE.md` and `FRONTEND_DOCUMENTATION.md`) for detailed API contracts and architectural decisions.

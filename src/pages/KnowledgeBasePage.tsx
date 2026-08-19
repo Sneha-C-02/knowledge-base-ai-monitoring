@@ -1,48 +1,54 @@
 import { useState, useEffect } from 'react';
-import { ExternalLink, Loader2, AlertCircle } from 'lucide-react';
+import { ExternalLink, Loader2, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { TextInput } from '../components/common/TextInput';
 import { Badge } from '../components/common/Badge';
 import { api } from '../api/client';
-import type { KBArticle } from '../types';
+import type { KBArticle, Pagination } from '../types';
 
 export function KnowledgeBasePage() {
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [articles, setArticles] = useState<KBArticle[]>([]);
+  const [pagination, setPagination] = useState<Pagination | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setCurrentPage(1); // Reset to page 1 on new search
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   useEffect(() => {
     let mounted = true;
-    api.getArticles()
+    setIsLoading(true);
+    setError(null);
+
+    api.getArticles(currentPage, 10, debouncedSearch)
       .then(data => {
         if (mounted) {
-          setArticles(data);
+          setArticles(data.items);
+          setPagination(data.pagination);
           setIsLoading(false);
         }
       })
       .catch(err => {
         if (mounted) {
           console.error(err);
-          setError("Failed to load knowledge base articles.");
+          setError("Failed to load knowledge base articles. Is the backend running?");
           setIsLoading(false);
         }
       });
     return () => { mounted = false; };
-  }, []);
-  
-  const filteredArticles = articles.filter(article => {
-    const term = searchTerm.toLowerCase();
-    // Use category as a substitute for instruments since we updated the types
-    return (
-      article.title.toLowerCase().includes(term) ||
-      article.id.toLowerCase().includes(term) ||
-      article.category.toLowerCase().includes(term)
-    );
-  });
+  }, [currentPage, debouncedSearch]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -72,9 +78,9 @@ export function KnowledgeBasePage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredArticles.length === 0 ? (
+          {articles.length === 0 ? (
             <div className="text-center p-8 text-slate-500">No articles match your search.</div>
-          ) : filteredArticles.map((article) => (
+          ) : articles.map((article) => (
             <Card key={article.id} className="hover:border-primary-300 transition-colors cursor-pointer" onClick={() => navigate(`/article/${article.id}`)}>
               <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
@@ -98,6 +104,31 @@ export function KnowledgeBasePage() {
               </CardContent>
             </Card>
           ))}
+
+          {/* Pagination Controls */}
+          {pagination && pagination.total_pages > 1 && (
+            <div className="flex items-center justify-between pt-6 mt-6 border-t border-slate-200">
+              <span className="text-sm text-slate-500">
+                Showing page {pagination.current_page} of {pagination.total_pages} ({pagination.total_items} total articles)
+              </span>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={!pagination.has_previous_page}
+                >
+                  <ChevronLeft size={16} className="mr-1" /> Previous
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setCurrentPage(prev => prev + 1)}
+                  disabled={!pagination.has_next_page}
+                >
+                  Next <ChevronRight size={16} className="ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
