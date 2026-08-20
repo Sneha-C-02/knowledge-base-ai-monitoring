@@ -33,7 +33,9 @@ class ApiClient {
         // Industry-level interceptor: Handle 401 Unauthorized globally
         if (response.status === 401) {
           localStorage.removeItem('auth_token');
-          window.location.href = '/login'; // Force redirect to login
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'; // Force redirect to login
+          }
           throw new Error('Session expired. Please log in again.');
         }
 
@@ -94,11 +96,13 @@ class ApiClient {
   }
 
   async getActivities(): Promise<ActivityLog[]> {
-    return this.fetch<ActivityLog[]>('/system/activities');
+    const response = await this.fetch<PaginatedResponse<ActivityLog>>('/system/activities');
+    return response.items || [];
   }
 
   async getNotifications(): Promise<Notification[]> {
-    return this.fetch<Notification[]>('/system/notifications');
+    const response = await this.fetch<PaginatedResponse<Notification>>('/system/notifications');
+    return response.items || [];
   }
 
   async getStats(): Promise<SystemStats> {

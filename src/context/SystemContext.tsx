@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { api } from '../api/client';
 import type { ActivityLog, Notification, SystemStats } from '../types';
+import { useAuth } from './AuthContext';
 
 interface SystemContextType {
   activities: ActivityLog[];
@@ -28,10 +29,13 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   });
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const { isAuthenticated } = useAuth();
+
   useEffect(() => {
     let mounted = true;
 
     const fetchData = async () => {
+      if (!isAuthenticated) return;
       try {
         const [acts, notifs, st] = await Promise.all([
           api.getActivities().catch(() => []),
@@ -60,7 +64,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       mounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [isAuthenticated]);
 
   // These functions would typically trigger POST requests to the backend
   const addActivity = (activity: Omit<ActivityLog, 'id' | 'timestamp'>) => {
