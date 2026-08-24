@@ -1,0 +1,1 @@
+print("User created (simulated)")

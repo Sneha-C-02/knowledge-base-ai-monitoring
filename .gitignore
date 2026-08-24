@@ -1,0 +1,14 @@
+.venv
+__pycache__
+*.pyc
+.env
+.pytest_cache
+.coverage
+htmlcov
+.ruff_cache
+.mypy_cache
+temporary_uploads/
+*.docx
+generate_docx.py
+generate_full_docx.py
+setup_script.py
