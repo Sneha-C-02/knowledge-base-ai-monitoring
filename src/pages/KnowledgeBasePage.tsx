@@ -5,6 +5,7 @@ import { Card, CardContent } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { TextInput } from '../components/common/TextInput';
 import { Badge } from '../components/common/Badge';
+import { useSystem } from '../context/SystemContext';
 import { api } from '../api/client';
 import type { KBArticle, Pagination } from '../types';
 
@@ -16,6 +17,8 @@ export function KnowledgeBasePage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  const { addActivity } = useSystem();
   const navigate = useNavigate();
 
   // Debounce search input
@@ -23,6 +26,16 @@ export function KnowledgeBasePage() {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm);
       setCurrentPage(1); // Reset to page 1 on new search
+      
+      if (searchTerm.trim()) {
+        addActivity({
+          type: 'KB_SEARCH',
+          message: 'User searched the knowledge base',
+          user: 'Current User',
+          severity: 'INFO',
+          metadata: { query: searchTerm }
+        });
+      }
     }, 500);
     return () => clearTimeout(timer);
   }, [searchTerm]);

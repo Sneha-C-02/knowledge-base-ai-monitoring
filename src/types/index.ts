@@ -16,11 +16,12 @@ export interface User {
 
 export interface ActivityLog {
   id: string;
-  type: 'search' | 'view' | 'alert' | 'system';
+  type: string;
   message: string;
   timestamp: string; // Storing as ISO string from API
   user: string;
-  metadata?: Record<string, string>;
+  severity?: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'CRITICAL';
+  metadata?: Record<string, any>;
 }
 
 export interface Notification {

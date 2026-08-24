@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Edit, Loader2, AlertCircle, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { api } from '../api/client';
+import { useSystem } from '../context/SystemContext';
 import type { KBArticle } from '../types';
 
 export function ArticlePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { addActivity } = useSystem();
   const [article, setArticle] = useState<KBArticle | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,20 +20,31 @@ export function ArticlePage() {
     if (!id) return;
     
     let mounted = true;
-    api.getArticle(id)
-      .then(data => {
+    const fetchArticle = async () => {
+      try {
+        const data = await api.getArticle(id);
         if (mounted) {
           setArticle(data);
           setIsLoading(false);
+          
+          addActivity({
+            type: 'KB_ARTICLE_VIEWED',
+            message: 'User viewed knowledge base article',
+            user: 'Current User',
+            severity: 'INFO',
+            metadata: { article_id: id, title: data.title }
+          });
         }
-      })
-      .catch(err => {
+      } catch (err) {
         if (mounted) {
           console.error(err);
           setError("Failed to load the article.");
-          setIsLoading(false);
         }
-      });
+      }
+    };
+    
+    fetchArticle();
+
     return () => { mounted = false; };
   }, [id]);
 
@@ -86,25 +99,42 @@ export function ArticlePage() {
         <CardHeader>
           <CardTitle className="text-2xl font-bold">{article.title}</CardTitle>
           <div className="flex flex-wrap gap-2">
-            <Badge variant="default">{article.category}</Badge>
+            <Badge variant="default">{article.category || 'Knowledge Base'}</Badge>
           </div>
         </CardHeader>
         <CardContent>
           <div className="prose max-w-none text-slate-700">
-            <h3 className="text-lg font-semibold mb-2 mt-6">Issue Description</h3>
-            <p className="mb-6">{article.description}</p>
+            {article.description && (
+              <>
+                <h3 className="text-lg font-semibold mb-2 mt-6">Issue Description</h3>
+                <p className="mb-6">{article.description}</p>
+              </>
+            )}
             
-            <h3 className="text-lg font-semibold mb-2">Resolution</h3>
-            <div className="bg-slate-50 p-6 rounded-md border border-slate-200">
-              <ol className="list-decimal list-inside space-y-3">
-                {article.resolution_steps.map((step: string, idx: number) => (
-                  <li key={idx} className="pl-2">{step}</li>
-                ))}
-              </ol>
-            </div>
+
+
+            {/* Render searchable content from backend if resolution steps don't exist */}
+            {(article as any).searchable_content && (
+              <>
+                <h3 className="text-lg font-semibold mb-2 mt-4">Content</h3>
+                <div className="bg-slate-50 p-6 rounded-md border border-slate-200 whitespace-pre-wrap font-sans text-sm">
+                  {(article as any).searchable_content}
+                </div>
+              </>
+            )}
+            
+            {(article as any).url && (
+              <div className="mt-8">
+                <a href={(article as any).url} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline inline-flex items-center">
+                  View Original Source on Waters.com <ExternalLink size={14} className="ml-1" />
+                </a>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
     </div>
   );
 }
+
+// Force Vite Cache Invalidation: 1

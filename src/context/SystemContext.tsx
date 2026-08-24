@@ -68,13 +68,18 @@ export function SystemProvider({ children }: { children: ReactNode }) {
 
   // These functions would typically trigger POST requests to the backend
   const addActivity = (activity: Omit<ActivityLog, 'id' | 'timestamp'>) => {
-    // Optimistic UI update or wait for WebSocket sync
+    // Optimistic UI update
     const newActivity: ActivityLog = {
       ...activity,
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString(),
     };
     setActivities(prev => [newActivity, ...prev]);
+
+    // Persist to backend
+    api.createActivity(activity.type, activity.message, activity.severity, activity.metadata).catch(err => {
+      console.error("Failed to persist activity to backend", err);
+    });
   };
 
   const addNotification = (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
@@ -85,6 +90,11 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       read: false,
     };
     setNotifications(prev => [newNotification, ...prev]);
+
+    // Log the notification generation as an activity
+    api.createActivity('system', 'NOTIFICATION_GENERATED').catch(err => {
+      console.error("Failed to log notification activity", err);
+    });
   };
 
   const markNotificationRead = (id: string) => {

@@ -46,6 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // Log the logout activity before clearing session
+    if (user) {
+      api.createActivity('USER_LOGOUT', 'User logged out', 'INFO').catch(err => {
+        console.error("Failed to log logout activity", err);
+      });
+    }
+
     setUser(null);
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');

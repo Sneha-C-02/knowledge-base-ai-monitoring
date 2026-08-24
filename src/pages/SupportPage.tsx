@@ -5,35 +5,72 @@ import { Button } from '../components/common/Button';
 import { TextArea } from '../components/common/TextArea';
 import { Badge } from '../components/common/Badge';
 import { api } from '../api/client';
+import { useSystem } from '../context/SystemContext';
 
 export function SupportPage() {
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [answer, setAnswer] = useState<{
     text: string;
-    related_article?: string;
-    related_article_url?: string;
+    related_articles?: {
+      article_number: string;
+      title: string;
+      article_url: string;
+      snippet: string;
+      retrieval_reason: string;
+      relevance_score: number;
+    }[];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { addActivity } = useSystem();
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
 
-    setIsSearching(true);
-    setError(null);
     setAnswer(null);
+    setError(null);
+    setIsSearching(true);
+    
+    // Log QUERY_SUBMITTED
+    addActivity({ 
+      type: 'QUERY_SUBMITTED', 
+      message: 'User submitted a support query', 
+      user: 'Current User', 
+      severity: 'INFO', 
+      metadata: { query } 
+    });
 
     try {
+      const startTime = Date.now();
       const response = await api.querySupport(query);
+      const durationMs = Date.now() - startTime;
+      
       setAnswer({
         text: response.answer,
-        related_article: response.related_article,
-        related_article_url: response.related_article_url
+        related_articles: response.related_articles
+      });
+      
+      // Log SYSTEM_RESPONSE
+      addActivity({ 
+        type: 'SYSTEM_RESPONSE', 
+        message: 'System generated a response', 
+        user: 'System', 
+        severity: 'SUCCESS',
+        metadata: { duration_ms: durationMs, related_articles_count: response.related_articles?.length || 0 }
       });
     } catch (err) {
       console.error(err);
       setError("Failed to generate an answer. Please check your connection to the backend API.");
+      
+      // Log QUERY_ERROR
+      addActivity({ 
+        type: 'QUERY_ERROR', 
+        message: 'Failed to generate system response', 
+        user: 'System', 
+        severity: 'ERROR',
+        metadata: { query }
+      });
     } finally {
       setIsSearching(false);
     }
@@ -87,25 +124,34 @@ export function SupportPage() {
                 <p className="text-slate-600 leading-relaxed mb-4">
                   {answer.text}
                 </p>
-                {answer.related_article && (
-                  <div className="bg-white border border-slate-200 rounded-lg p-4 mt-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2 text-indigo-600">
-                        <BookOpen size={18} />
-                        <span className="font-semibold text-sm">Source Article</span>
+                {answer.related_articles && answer.related_articles.length > 0 && (
+                  <div className="mt-6 space-y-4">
+                    <div className="flex items-center gap-2 text-indigo-600 mb-2">
+                      <BookOpen size={18} />
+                      <span className="font-semibold text-sm">Source Articles</span>
+                    </div>
+                    {answer.related_articles.map((article, idx) => (
+                      <div key={idx} className="bg-white border border-slate-200 rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-bold text-slate-800">{article.article_number} - {article.title}</h4>
+                          <Badge variant="default" className="text-xs">
+                            Score: {article.relevance_score.toFixed(2)}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-slate-600 mb-2">{article.snippet}...</p>
+                        <p className="text-xs text-slate-500 mb-4 italic">Matched by: {article.retrieval_reason}</p>
+                        
+                        <div className="pt-3 border-t border-slate-100 flex justify-end">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => window.open(article.article_url || `/article/${article.article_number}`, '_blank')}
+                          >
+                            View Full Article
+                          </Button>
+                        </div>
                       </div>
-                      <Badge variant="default" className="text-xs">High Confidence</Badge>
-                    </div>
-                    <h4 className="font-bold text-slate-800 mb-2">{answer.related_article}</h4>
-                    
-                    <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
-                      <Button 
-                        variant="outline" 
-                        onClick={() => window.open(answer.related_article_url || `/article/${answer.related_article}`, '_blank')}
-                      >
-                        View Full Article
-                      </Button>
-                    </div>
+                    ))}
                   </div>
                 )}
               </div>

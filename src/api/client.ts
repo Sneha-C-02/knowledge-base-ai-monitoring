@@ -72,8 +72,28 @@ class ApiClient {
   }
 
   // --- Support ---
-  async querySupport(query: string): Promise<{ answer: string; related_article?: string; related_article_url?: string }> {
-    return this.fetch<{ answer: string; related_article?: string; related_article_url?: string }>('/support/query', {
+  async querySupport(query: string): Promise<{ 
+    answer: string; 
+    related_articles?: {
+      article_number: string;
+      title: string;
+      article_url: string;
+      snippet: string;
+      retrieval_reason: string;
+      relevance_score: number;
+    }[] 
+  }> {
+    return this.fetch<{ 
+      answer: string; 
+      related_articles?: {
+        article_number: string;
+        title: string;
+        article_url: string;
+        snippet: string;
+        retrieval_reason: string;
+        relevance_score: number;
+      }[] 
+    }>('/support/query', {
       method: 'POST',
       body: JSON.stringify({ query }),
     });
@@ -98,6 +118,13 @@ class ApiClient {
   async getActivities(): Promise<ActivityLog[]> {
     const response = await this.fetch<PaginatedResponse<ActivityLog>>('/system/activities');
     return response.items || [];
+  }
+
+  async createActivity(type: string, message: string, severity: string = 'INFO', metadata?: Record<string, any>): Promise<void> {
+    return this.fetch<void>('/system/activities', {
+      method: 'POST',
+      body: JSON.stringify({ type, message, severity, metadata })
+    });
   }
 
   async getNotifications(): Promise<Notification[]> {

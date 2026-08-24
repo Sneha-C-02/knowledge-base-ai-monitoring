@@ -30,9 +30,18 @@ export function MonitoringPage() {
     setResult(null);
 
     addActivity({
-      type: 'system',
-      message: 'MANUAL_DIAGNOSTIC_RUN',
-      user: 'Admin User',
+      type: 'LOG_FILE_SUBMITTED',
+      message: 'User submitted instrument log',
+      user: 'Current User',
+      severity: 'INFO',
+      metadata: { filenames: validFiles.map(f => f.name).join(', ') }
+    });
+
+    addActivity({
+      type: 'MONITORING_STARTED',
+      message: 'Log monitoring analysis started',
+      user: 'System',
+      severity: 'INFO'
     });
 
     const processLog = async () => {
@@ -45,20 +54,51 @@ export function MonitoringPage() {
           detectedIssues: stats.detectedIssues + 1
         });
 
-        addNotification({
-          type: analysisResult.status === 'CRITICAL' ? 'error' : 'warning',
-          title: 'Log Analysis Complete',
-          message: `System analyzed ${validFiles.length} uploaded log file(s).`,
-        });
+        if (analysisResult.issues && analysisResult.issues.length > 0) {
+          analysisResult.issues.forEach((issue: any) => {
+            addNotification({
+              type: issue.severity === 'CRITICAL' ? 'error' : 'warning',
+              title: `New Issue Detected: ${issue.pattern}`,
+              message: `${issue.description}\n\nRecommended Action: ${issue.recommended_action}${issue.related_article ? `\n\nRelated Article: ${issue.related_article}` : ''}`
+            });
+            
+            addActivity({
+              type: 'ISSUE_DETECTED',
+              message: 'Critical issue detected in instrument log',
+              user: 'System',
+              severity: 'CRITICAL',
+              metadata: { 
+                filenames: validFiles.map(f => f.name).join(', '), 
+                issue_type: issue.severity, 
+                pattern: issue.pattern 
+              }
+            });
+          });
+          addNotification({
+            type: analysisResult.status === 'CRITICAL' ? 'error' : 'warning',
+            title: 'Log Analysis Complete',
+            message: `System analyzed ${validFiles.length} file(s). No issues found.`,
+          });
+        }
         
         addActivity({
-          type: 'system',
-          message: 'LOG_ANALYZED',
+          type: 'MONITORING_COMPLETED',
+          message: 'Log analysis completed',
           user: 'System',
+          severity: 'SUCCESS',
+          metadata: { filenames: validFiles.map(f => f.name).join(', ') }
         });
       } catch (err) {
         console.error(err);
         setError("Failed to analyze log. Backend API is unreachable.");
+        
+        addActivity({
+          type: 'MONITORING_ERROR',
+          message: 'Log analysis failed',
+          user: 'System',
+          severity: 'ERROR',
+          metadata: { filenames: validFiles.map(f => f.name).join(', ') }
+        });
       } finally {
         setIsMonitoring(false);
       }

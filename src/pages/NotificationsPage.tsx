@@ -4,12 +4,26 @@ import { Card, CardContent } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 
 export function NotificationsPage() {
-  const { notifications, markNotificationRead, clearNotifications } = useSystem();
+  const { notifications, markNotificationRead, clearNotifications, addActivity } = useSystem();
 
   const handleMarkAllAsRead = () => {
     notifications.forEach(n => {
       if (!n.read) markNotificationRead(n.id);
     });
+  };
+
+  const handleNotificationClick = (notification: any) => {
+    if (!notification.read) {
+      markNotificationRead(notification.id);
+      
+      addActivity({
+        type: 'NOTIFICATION_READ',
+        message: 'User viewed notification',
+        user: 'Current User',
+        severity: 'INFO',
+        metadata: { notification_id: notification.id, title: notification.title }
+      });
+    }
   };
 
   const getIcon = (type: string) => {
@@ -43,7 +57,7 @@ export function NotificationsPage() {
           ) : (
             <div className="divide-y divide-slate-100">
               {notifications.map(notif => (
-                <div key={notif.id} className={`p-4 flex gap-4 ${notif.read ? 'bg-white opacity-70' : 'bg-slate-50'}`}>
+                <div key={notif.id} onClick={() => handleNotificationClick(notif)} className={`p-4 flex gap-4 cursor-pointer hover:bg-slate-100 transition-colors ${notif.read ? 'bg-white opacity-70' : 'bg-slate-50'}`}>
                 <div className="shrink-0 mt-1">
                   {getIcon(notif.type)}
                 </div>
