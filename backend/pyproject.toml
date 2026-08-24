@@ -1,0 +1,52 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "knowledge-base-backend"
+version = "0.1.0"
+description = "Knowledge Base AI Support & Proactive Monitoring Tool"
+authors = ["Admin <admin@example.com>"]
+readme = "README.md"
+packages = [{include = "knowledge_base_backend", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.109.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+bcrypt = "3.2.2"
+pydantic = "^2.5.3"
+pydantic-settings = "^2.1.0"
+sqlalchemy = "^2.0.25"
+asyncpg = "^0.29.0"
+alembic = "^1.13.1"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+python-multipart = "^0.0.6"
+httpx = "^0.26.0"
+tenacity = "^8.2.3"
+dependency-injector = "^4.41.0"
+structlog = "^24.1.0"
+uuid = "^1.30"
+"aiofiles" = "^23.2.1"
+sentence-transformers = "^3.0.0"
+pgvector = "^0.3.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.4"
+ruff = "^0.1.14"
+mypy = "^1.8.0"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

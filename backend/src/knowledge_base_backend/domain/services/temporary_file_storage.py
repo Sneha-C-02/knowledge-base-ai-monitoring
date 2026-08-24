@@ -1,0 +1,6 @@
+from typing import Protocol
+from typing import BinaryIO
+
+class TemporaryFileStorage(Protocol):
+    async def store_temporary_file(self, filename: str, file_stream: BinaryIO) -> str: ...
+    async def delete_temporary_file(self, file_path: str) -> None: ...
