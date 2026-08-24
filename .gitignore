@@ -1,0 +1,52 @@
+# =============================================================================
+# Waters Knowledge Base Loader - Git Ignore Rules
+# =============================================================================
+
+# Environment secrets
+.env
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# pytest cache
+.pytest_cache/
+.mypy_cache/
+
+# Output files (logs, reports, exports)
+output/
+*.log
+
+# IDE metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Playwright browser data
+playwright-browsers/
+
+# Local database dumps
+*.sql
+*.dump
+*.bak
+
+# Scrapy cache
+.scrapy/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# OS files
+.DS_Store
+Thumbs.db
