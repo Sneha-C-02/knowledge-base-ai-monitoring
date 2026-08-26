@@ -29,7 +29,7 @@ class SystemNotificationSchema(BaseModel):
     title: str
     message: str
     type: str
-    is_read: bool
+    read: bool
     timestamp: datetime.datetime
     
 class SystemNotificationPageResponse(BaseModel):

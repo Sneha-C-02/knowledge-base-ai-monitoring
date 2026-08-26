@@ -55,3 +55,47 @@ export interface PaginatedResponse<T> {
   items: T[];
   pagination: Pagination;
 }
+
+// --- Log Monitoring Dashboard Types ---
+
+export interface Instrument {
+  id: number;
+  name: string;
+}
+
+export interface DashboardBullet {
+  text: string;
+  severity: 'critical' | 'warning' | 'info' | null;
+}
+
+export interface DashboardResult {
+  instrument_id: number;
+  instrument_name: string;
+  critical_incidents: number;
+  warnings: number;
+  errors: number;
+  healthy_apps: number;
+  overall_status: 'CRITICAL' | 'WARNING' | 'OK';
+  files_analyzed: number;
+  daily_summary_bullets: DashboardBullet[];
+}
+
+export interface InstrumentMemoryEntry {
+  id: number;
+  instrument_id: number;
+  instrument_name: string;
+  analysis_timestamp: string;
+  log_filename: string;
+  critical_incidents: number;
+  warnings: number;
+  errors: number;
+  healthy_apps: number;
+  ai_summary: string;
+}
+
+export interface InstrumentMemoryResponse {
+  instrument_id: number;
+  instrument_name: string;
+  total_analyses: number;
+  history: InstrumentMemoryEntry[];
+}

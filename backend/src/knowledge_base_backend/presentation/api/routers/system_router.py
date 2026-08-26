@@ -89,7 +89,7 @@ async def list_notifications(
                 "title": notif.title,
                 "message": notif.message,
                 "type": notif.notification_type,
-                "is_read": notif.is_read,
+                "read": notif.is_read,
                 "timestamp": notif.created_at
             } for notif in result.items
         ],

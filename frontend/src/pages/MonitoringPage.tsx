@@ -1,25 +1,92 @@
-import { useState } from 'react';
-import { Play, FileText, AlertTriangle, ShieldCheck, Clock, ExternalLink, Plus, X, Upload } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Play, FileText, AlertTriangle, ShieldCheck, AlertCircle, Clock, Plus, X, Upload, Activity, History, Zap, CheckCircle2, Radio } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSystem } from '../context/SystemContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { api } from '../api/client';
+import type { Instrument, DashboardResult, InstrumentMemoryResponse } from '../types';
 
 export function MonitoringPage() {
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [selectedInstrumentId, setSelectedInstrumentId] = useState<number | ''>('');
   const [logFiles, setLogFiles] = useState<(File | null)[]>([null]);
   const [isMonitoring, setIsMonitoring] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<DashboardResult | null>(null);
+  const [memory, setMemory] = useState<InstrumentMemoryResponse | null>(null);
+  const [showMemory, setShowMemory] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(false);
   const { addActivity, addNotification, updateStats, stats } = useSystem();
   
   const MAX_LOGS = 10;
+
+  // Fetch instruments for the dropdown
+  useEffect(() => {
+    api.getInstruments()
+      .then(setInstruments)
+      .catch(err => {
+        console.error('Failed to fetch instruments:', err);
+      });
+  }, []);
+
+  // Setup SSE for live continuous monitoring
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    
+    if (result && selectedInstrumentId && !isMonitoring) {
+      setIsLive(true);
+      eventSource = api.streamDashboard(selectedInstrumentId as number);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data: DashboardResult = JSON.parse(event.data);
+          setResult(data);
+          
+          // Optionally refetch memory history automatically when a new analysis is complete
+          if (showMemory) {
+            api.getInstrumentMemory(selectedInstrumentId as number).then(setMemory);
+          }
+          
+          // Show toast for incremental updates
+          const notifType = data.overall_status === 'CRITICAL' ? 'error' as const
+            : data.overall_status === 'WARNING' ? 'warning' as const
+            : 'success' as const;
+
+          addNotification({
+            type: notifType,
+            title: `Live Update: ${data.instrument_name}`,
+            message: `New log lines analyzed. Status: ${data.overall_status}`
+          });
+        } catch (err) {
+          console.error("Failed to parse SSE data", err);
+        }
+      };
+      
+      eventSource.onerror = () => {
+        console.error("SSE connection error");
+        setIsLive(false);
+      };
+    }
+    
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+        setIsLive(false);
+      }
+    };
+  }, [result?.instrument_id, selectedInstrumentId, isMonitoring, showMemory, addNotification]);
 
   const handleStartMonitoring = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     
+    if (!selectedInstrumentId) {
+      setError("Please select an instrument.");
+      return;
+    }
+
     const validFiles = logFiles.filter((f): f is File => f !== null);
     if (validFiles.length === 0) {
       setError("Please select at least one log file to upload.");
@@ -28,65 +95,49 @@ export function MonitoringPage() {
 
     setIsMonitoring(true);
     setResult(null);
+    setMemory(null);
+    setShowMemory(false);
 
     addActivity({
       type: 'LOG_FILE_SUBMITTED',
-      message: 'User submitted instrument log',
+      message: `Log analysis started for instrument #${selectedInstrumentId}`,
       user: 'Current User',
       severity: 'INFO',
-      metadata: { filenames: validFiles.map(f => f.name).join(', ') }
-    });
-
-    addActivity({
-      type: 'MONITORING_STARTED',
-      message: 'Log monitoring analysis started',
-      user: 'System',
-      severity: 'INFO'
+      metadata: { filenames: validFiles.map(f => f.name).join(', '), instrument_id: selectedInstrumentId }
     });
 
     const processLog = async () => {
       try {
-        const analysisResult = await api.analyzeLog(validFiles);
-        setResult(analysisResult);
+        const dashboardResult = await api.analyzeDashboard(selectedInstrumentId as number, validFiles);
+        setResult(dashboardResult);
         
         updateStats({ 
           activeLogs: stats.activeLogs + validFiles.length,
-          detectedIssues: stats.detectedIssues + 1
+          detectedIssues: stats.detectedIssues + dashboardResult.critical_incidents + dashboardResult.errors
         });
 
-        if (analysisResult.issues && analysisResult.issues.length > 0) {
-          analysisResult.issues.forEach((issue: any) => {
-            addNotification({
-              type: issue.severity === 'CRITICAL' ? 'error' : 'warning',
-              title: `New Issue Detected: ${issue.pattern}`,
-              message: `${issue.description}\n\nRecommended Action: ${issue.recommended_action}${issue.related_article ? `\n\nRelated Article: ${issue.related_article}` : ''}`
-            });
-            
-            addActivity({
-              type: 'ISSUE_DETECTED',
-              message: 'Critical issue detected in instrument log',
-              user: 'System',
-              severity: 'CRITICAL',
-              metadata: { 
-                filenames: validFiles.map(f => f.name).join(', '), 
-                issue_type: issue.severity, 
-                pattern: issue.pattern 
-              }
-            });
-          });
-          addNotification({
-            type: analysisResult.status === 'CRITICAL' ? 'error' : 'warning',
-            title: 'Log Analysis Complete',
-            message: `System analyzed ${validFiles.length} file(s). No issues found.`,
-          });
-        }
+        // Generate notification based on severity
+        const notifType = dashboardResult.overall_status === 'CRITICAL' ? 'error' as const
+          : dashboardResult.overall_status === 'WARNING' ? 'warning' as const
+          : 'success' as const;
+
+        addNotification({
+          type: notifType,
+          title: `AI Dashboard: ${dashboardResult.instrument_name}`,
+          message: `Critical: ${dashboardResult.critical_incidents} | Warnings: ${dashboardResult.warnings} | Errors: ${dashboardResult.errors} | Healthy: ${dashboardResult.healthy_apps}`
+        });
         
         addActivity({
           type: 'MONITORING_COMPLETED',
-          message: 'Log analysis completed',
+          message: `Dashboard analysis completed — ${dashboardResult.overall_status}`,
           user: 'System',
-          severity: 'SUCCESS',
-          metadata: { filenames: validFiles.map(f => f.name).join(', ') }
+          severity: dashboardResult.overall_status === 'CRITICAL' ? 'CRITICAL' : 'SUCCESS',
+          metadata: { 
+            filenames: validFiles.map(f => f.name).join(', '),
+            critical: dashboardResult.critical_incidents,
+            warnings: dashboardResult.warnings,
+            errors: dashboardResult.errors
+          }
         });
       } catch (err) {
         console.error(err);
@@ -107,15 +158,76 @@ export function MonitoringPage() {
     processLog();
   };
 
+  const handleViewMemory = async () => {
+    if (!selectedInstrumentId) return;
+    try {
+      const memoryData = await api.getInstrumentMemory(selectedInstrumentId as number);
+      setMemory(memoryData);
+      setShowMemory(true);
+    } catch (err) {
+      console.error('Failed to fetch instrument memory:', err);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'CRITICAL': return 'text-red-700 bg-red-50 border-red-200';
+      case 'WARNING': return 'text-amber-700 bg-amber-50 border-amber-200';
+      default: return 'text-green-700 bg-green-50 border-green-200';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'CRITICAL': return <AlertCircle className="text-red-600" size={32} />;
+      case 'WARNING': return <AlertTriangle className="text-amber-600" size={32} />;
+      default: return <ShieldCheck className="text-green-600" size={32} />;
+    }
+  };
+
+  const getBulletColor = (severity: string | null) => {
+    switch (severity) {
+      case 'critical': return 'text-red-700 bg-red-50 border-l-red-500';
+      case 'warning': return 'text-amber-700 bg-amber-50 border-l-amber-500';
+      default: return 'text-slate-700 bg-blue-50 border-l-blue-500';
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-800">Proactive Log Monitoring</h1>
+        {selectedInstrumentId && (
+          <Button variant="outline" onClick={handleViewMemory} className="text-sm">
+            <History size={16} className="mr-2" /> View Analysis History
+          </Button>
+        )}
       </div>
 
+      {/* Upload Form */}
       <Card>
         <CardContent className="p-6">
           <form onSubmit={handleStartMonitoring} className="space-y-4">
+            {/* Instrument Selector */}
+            <div>
+              <label htmlFor="instrument-select" className="block text-sm font-medium text-slate-700 mb-2">
+                Select Instrument
+              </label>
+              <select
+                id="instrument-select"
+                value={selectedInstrumentId}
+                onChange={(e) => setSelectedInstrumentId(e.target.value ? Number(e.target.value) : '')}
+                className="w-full h-10 px-3 border border-slate-300 rounded-md bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                disabled={isMonitoring}
+              >
+                <option value="">-- Select an instrument --</option>
+                {instruments.map(inst => (
+                  <option key={inst.id} value={inst.id}>{inst.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* File Upload */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Upload Machine Log Files (Max {MAX_LOGS})
@@ -187,130 +299,192 @@ export function MonitoringPage() {
         </CardContent>
       </Card>
 
+      {/* ===== AI DASHBOARD RESULT ===== */}
       {result && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-500">
-          <div className="lg:col-span-1 space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">File Status</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Access</span>
-                  <Badge variant="success">{result.file_status}</Badge>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Size</span>
-                  <span className="font-medium text-slate-800">{result.file_info.size}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Modified</span>
-                  <span className="font-medium text-slate-800">{result.file_info.last_modified}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className={result.status === 'WARNING' ? 'bg-yellow-50 border-yellow-200' : ''}>
-              <CardContent className="p-6 text-center">
-                <h3 className="text-sm font-medium text-slate-500 mb-2">Overall Status</h3>
-                <div className="flex items-center justify-center gap-2">
-                  {result.status === 'WARNING' ? (
-                    <AlertTriangle className="text-yellow-600" size={32} />
-                  ) : (
-                    <ShieldCheck className="text-green-600" size={32} />
-                  )}
-                  <span className={`text-2xl font-bold ${result.status === 'WARNING' ? 'text-yellow-700' : 'text-green-700'}`}>
-                    {result.status}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="lg:col-span-2 space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Detected Issues</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                {result.issues.length === 0 ? (
-                  <div className="p-6 text-center text-slate-500">No issues detected.</div>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {result.issues.map((issue: any) => (
-                      <div key={issue.id} className="p-4">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <Badge variant={issue.severity === 'WARNING' ? 'warning' : 'error'}>
-                              {issue.severity}
-                            </Badge>
-                            <span className="font-bold text-slate-800">{issue.pattern}</span>
-                          </div>
-                          <span className="text-sm text-slate-500 flex items-center gap-1">
-                            <Clock size={14} /> {issue.timestamp}
-                          </span>
-                        </div>
-                        <p className="text-slate-700 text-sm mb-3">{issue.description}</p>
-                        <div className="bg-slate-50 p-3 rounded border border-slate-100 flex justify-between items-center">
-                          <div>
-                            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Recommended Action</span>
-                            <p className="mt-1 font-medium">{issue.recommended_action}</p>
-                          </div>
-                          {issue.related_article && (
-                            <div>
-                              <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider block mb-1">Related Article</span>
-                              <div className="mt-1">
-                                <Button variant="outline" className="px-2 py-1 text-sm h-auto" onClick={() => window.open(issue.related_article_url || `/article/${issue.related_article}`, '_blank')}>
-                                  {issue.related_article} <ExternalLink size={14} className="ml-2" />
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+        <div className="space-y-6 animate-in fade-in duration-500">
+          {/* Overall Status Banner */}
+          <Card className={`border-2 ${getStatusColor(result.overall_status)}`}>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  {getStatusIcon(result.overall_status)}
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-bold">{result.instrument_name}</h2>
+                      {isLive && (
+                        <span className="flex items-center text-xs font-medium text-red-600 bg-red-100 px-2 py-0.5 rounded-full animate-pulse">
+                          <Radio size={12} className="mr-1" /> LIVE
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm opacity-75">
+                      {result.files_analyzed} file(s) monitored • AI-powered continuous diagnostics
+                    </p>
                   </div>
-                )}
+                </div>
+                <Badge variant={
+                  result.overall_status === 'CRITICAL' ? 'error' :
+                  result.overall_status === 'WARNING' ? 'warning' : 'success'
+                }>
+                  {result.overall_status}
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Stat Cards Grid */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-5 text-center">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-red-100 text-red-600 mx-auto mb-2">
+                  <Zap size={22} />
+                </div>
+                <p className="text-3xl font-bold text-red-700">{result.critical_incidents}</p>
+                <p className="text-xs font-medium text-slate-500 mt-1 uppercase tracking-wider">Critical Incidents</p>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Recent Log Events</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-100">
-                      <tr>
-                        <th className="px-4 py-2 w-24">Time</th>
-                        <th className="px-4 py-2 w-20">Level</th>
-                        <th className="px-4 py-2">Message</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-mono text-xs">
-                      {result.recent_events.map((evt: any, i: number) => (
-                        <tr key={i} className="hover:bg-slate-50">
-                          <td className="px-4 py-2 text-slate-500">{evt.timestamp}</td>
-                          <td className="px-4 py-2">
-                            <span className={clsx(
-                              "px-1.5 py-0.5 rounded font-bold",
-                              evt.level === 'ERROR' ? 'text-red-700 bg-red-50' :
-                              evt.level === 'WARN' ? 'text-yellow-700 bg-yellow-50' : 'text-slate-600 bg-slate-100'
-                            )}>
-                              {evt.level}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 text-slate-800">{evt.message}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <CardContent className="p-5 text-center">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-amber-100 text-amber-600 mx-auto mb-2">
+                  <AlertTriangle size={22} />
                 </div>
+                <p className="text-3xl font-bold text-amber-700">{result.warnings}</p>
+                <p className="text-xs font-medium text-slate-500 mt-1 uppercase tracking-wider">Warnings</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-5 text-center">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-orange-100 text-orange-600 mx-auto mb-2">
+                  <AlertCircle size={22} />
+                </div>
+                <p className="text-3xl font-bold text-orange-700">{result.errors}</p>
+                <p className="text-xs font-medium text-slate-500 mt-1 uppercase tracking-wider">Errors</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-5 text-center">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-green-100 text-green-600 mx-auto mb-2">
+                  <CheckCircle2 size={22} />
+                </div>
+                <p className="text-3xl font-bold text-green-700">{result.healthy_apps}</p>
+                <p className="text-xs font-medium text-slate-500 mt-1 uppercase tracking-wider">Healthy Apps</p>
               </CardContent>
             </Card>
           </div>
+
+          {/* AI Daily Summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Activity size={18} className="text-primary-500" />
+                AI Generated Daily Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {result.daily_summary_bullets.length === 0 ? (
+                <div className="p-6 text-center text-slate-500">No findings to report.</div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {result.daily_summary_bullets.map((bullet, idx) => (
+                    <div
+                      key={idx}
+                      className={clsx(
+                        "px-5 py-3 border-l-4 transition-colors",
+                        getBulletColor(bullet.severity)
+                      )}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-sm leading-relaxed">{bullet.text}</span>
+                        {bullet.severity && (
+                          <Badge
+                            variant={
+                              bullet.severity === 'critical' ? 'error' :
+                              bullet.severity === 'warning' ? 'warning' : 'info'
+                            }
+                            className="shrink-0 text-xs"
+                          >
+                            {bullet.severity.toUpperCase()}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
+      )}
+
+      {/* ===== INSTRUMENT MEMORY / HISTORY ===== */}
+      {showMemory && memory && (
+        <Card className="animate-in fade-in duration-500">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <History size={18} className="text-primary-500" />
+                Analysis History — {memory.instrument_name}
+              </CardTitle>
+              <Badge variant="default">{memory.total_analyses} analyses</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {memory.history.length === 0 ? (
+              <div className="p-6 text-center text-slate-500">No analysis history found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-100">
+                    <tr>
+                      <th className="px-4 py-2">Timestamp</th>
+                      <th className="px-4 py-2">File</th>
+                      <th className="px-4 py-2 text-center">Critical</th>
+                      <th className="px-4 py-2 text-center">Warnings</th>
+                      <th className="px-4 py-2 text-center">Errors</th>
+                      <th className="px-4 py-2 text-center">Healthy</th>
+                      <th className="px-4 py-2">Summary</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {memory.history.map((entry) => (
+                      <tr key={entry.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2 text-slate-500 whitespace-nowrap font-mono text-xs">
+                          <Clock size={12} className="inline mr-1" />
+                          {new Date(entry.analysis_timestamp).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 font-mono text-xs">{entry.log_filename}</td>
+                        <td className="px-4 py-2 text-center">
+                          <span className={clsx("font-bold", entry.critical_incidents > 0 ? "text-red-600" : "text-slate-400")}>
+                            {entry.critical_incidents}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <span className={clsx("font-bold", entry.warnings > 0 ? "text-amber-600" : "text-slate-400")}>
+                            {entry.warnings}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <span className={clsx("font-bold", entry.errors > 0 ? "text-orange-600" : "text-slate-400")}>
+                            {entry.errors}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <span className="font-bold text-green-600">{entry.healthy_apps}</span>
+                        </td>
+                        <td className="px-4 py-2 text-slate-600 text-xs max-w-xs truncate">
+                          {entry.ai_summary}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

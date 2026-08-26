@@ -1,6 +1,7 @@
-﻿from dependency_injector import containers, providers
+from dependency_injector import containers, providers
 from src.knowledge_base_backend.infrastructure.database.database_session_factory import async_session_factory
 from src.knowledge_base_backend.infrastructure.database.session_context import get_current_session
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_article_repository import SqlAlchemyArticleRepository
@@ -10,6 +11,8 @@ from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_activity_repository import SqlAlchemyActivityRepository
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_notification_repository import SqlAlchemyNotificationRepository
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_monitoring_repository import SqlAlchemyMonitoringRepository
+from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_instrument_memory_repository import SqlAlchemyInstrumentMemoryRepository
+from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_monitored_log_file_repository import SqlAlchemyMonitoredLogFileRepository
 
 from src.knowledge_base_backend.infrastructure.authentication.jwt_authentication_token_service import JwtAuthenticationTokenService
 from src.knowledge_base_backend.infrastructure.authentication.argon2_password_hashing_service import Argon2PasswordHashingService
@@ -31,7 +34,10 @@ from src.knowledge_base_backend.infrastructure.monitoring.standard_log_file_vali
 from src.knowledge_base_backend.infrastructure.monitoring.plain_text_log_content_parser import PlainTextLogContentParser
 from src.knowledge_base_backend.infrastructure.monitoring.rule_based_log_analysis_service import RuleBasedLogAnalysisService
 from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_log_analysis_service import GroqLogAnalysisService
+from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_dashboard_analysis_service import GroqDashboardAnalysisService
 from src.knowledge_base_backend.infrastructure.monitoring.local_temporary_file_storage import LocalTemporaryFileStorage
+from src.knowledge_base_backend.infrastructure.monitoring.local_persistent_file_storage import LocalPersistentFileStorage
+from src.knowledge_base_backend.infrastructure.events.event_bus import EventBus
 from src.knowledge_base_backend.infrastructure.system.utc_date_time_provider import UtcDateTimeProvider
 
 from src.knowledge_base_backend.application.use_cases.authenticate_user import AuthenticateUserUseCase
@@ -39,10 +45,12 @@ from src.knowledge_base_backend.application.use_cases.list_knowledge_base_articl
 from src.knowledge_base_backend.application.use_cases.get_knowledge_base_article import GetKnowledgeBaseArticleUseCase
 from src.knowledge_base_backend.application.use_cases.submit_support_query import SubmitSupportQueryUseCase
 from src.knowledge_base_backend.application.use_cases.analyze_uploaded_logs import AnalyzeUploadedLogsUseCase
+from src.knowledge_base_backend.application.use_cases.analyze_logs_with_memory import AnalyzeLogsWithMemoryUseCase
 from src.knowledge_base_backend.application.use_cases.get_dashboard_statistics import GetDashboardStatisticsUseCase
 from src.knowledge_base_backend.application.use_cases.list_activities import ListActivitiesUseCase
 from src.knowledge_base_backend.application.use_cases.create_activity import CreateActivityUseCase
 from src.knowledge_base_backend.application.use_cases.list_notifications import ListNotificationsUseCase
+from src.knowledge_base_backend.application.services.continuous_monitoring_service import ContinuousMonitoringService
 
 from src.knowledge_base_backend.configuration.application_settings import settings
 
@@ -60,11 +68,14 @@ class ApplicationContainer(containers.DeclarativeContainer):
     activity_repository = providers.Factory(SqlAlchemyActivityRepository, session=db_session)
     notification_repository = providers.Factory(SqlAlchemyNotificationRepository, session=db_session)
     monitoring_repository = providers.Factory(SqlAlchemyMonitoringRepository, session=db_session)
+    instrument_memory_repository = providers.Factory(SqlAlchemyInstrumentMemoryRepository, session=db_session)
+    monitored_log_file_repository = providers.Factory(SqlAlchemyMonitoredLogFileRepository, session=db_session)
 
     # Core Services
     date_time_provider = providers.Singleton(UtcDateTimeProvider)
     password_hashing_service = providers.Singleton(Argon2PasswordHashingService)
     token_service = providers.Singleton(JwtAuthenticationTokenService)
+    event_bus = providers.Singleton(EventBus)
     
     # AI Providers Configuration
     if settings.embedding_provider == "disabled":
@@ -123,6 +134,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # Monitoring Services
     log_validator = providers.Singleton(StandardLogFileValidator)
     temporary_file_storage = providers.Singleton(LocalTemporaryFileStorage)
+    persistent_file_storage = providers.Singleton(LocalPersistentFileStorage)
     log_parser = providers.Singleton(PlainTextLogContentParser)
     
     if settings.answer_generation_provider == "groq":
@@ -139,6 +151,24 @@ class ApplicationContainer(containers.DeclarativeContainer):
     else:
         log_analysis_service = providers.Singleton(
             RuleBasedLogAnalysisService, parser=log_parser, date_time_provider=date_time_provider
+        )
+    
+    # Dashboard Analysis Service (Groq-powered, reads full logs with memory)
+    if settings.answer_generation_provider == "groq":
+        dashboard_analysis_service = providers.Singleton(
+            GroqDashboardAnalysisService,
+            api_key=settings.answer_generation_provider_api_key,
+            model_name=settings.answer_generation_model_name,
+            timeout=settings.answer_generation_timeout_seconds,
+            calls_per_minute=settings.groq_rate_limit_calls_per_minute
+        )
+    else:
+        dashboard_analysis_service = providers.Singleton(
+            GroqDashboardAnalysisService,
+            api_key=settings.answer_generation_provider_api_key or "",
+            model_name=settings.answer_generation_model_name or "llama3-8b-8192",
+            timeout=settings.answer_generation_timeout_seconds,
+            calls_per_minute=settings.groq_rate_limit_calls_per_minute
         )
     
     # Use Cases
@@ -176,6 +206,18 @@ class ApplicationContainer(containers.DeclarativeContainer):
         notification_repository=notification_repository
     )
     
+    analyze_logs_with_memory_use_case = providers.Factory(
+        AnalyzeLogsWithMemoryUseCase,
+        validator=log_validator,
+        storage=persistent_file_storage,
+        ai_service=dashboard_analysis_service,
+        memory_repository=instrument_memory_repository,
+        instrument_repository=instrument_repository,
+        notification_repository=notification_repository,
+        monitored_file_repository=monitored_log_file_repository,
+        date_time_provider=date_time_provider
+    )
+    
     get_dashboard_statistics_use_case = providers.Factory(
         GetDashboardStatisticsUseCase,
         article_repository=article_repository,
@@ -195,4 +237,14 @@ class ApplicationContainer(containers.DeclarativeContainer):
     
     list_notifications_use_case = providers.Factory(
         ListNotificationsUseCase, notification_repository=notification_repository
+    )
+
+    # Background Services
+    continuous_monitoring_service = providers.Singleton(
+        ContinuousMonitoringService,
+        session_factory=providers.Object(None), # Will be set in application factory
+        storage=persistent_file_storage,
+        analyze_use_case=analyze_logs_with_memory_use_case,
+        event_bus=event_bus,
+        polling_interval_seconds=15
     )

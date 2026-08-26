@@ -1,4 +1,4 @@
-import type { KBArticle, User, ActivityLog, Notification, SystemStats, PaginatedResponse } from '../types';
+import type { KBArticle, User, ActivityLog, Notification, SystemStats, PaginatedResponse, Instrument, DashboardResult, InstrumentMemoryResponse } from '../types';
 
 // Use environment variable for API URL or fallback to localhost
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
@@ -99,7 +99,9 @@ class ApiClient {
     });
   }
 
-  // --- Monitoring & System ---
+  // --- Monitoring & Dashboard ---
+
+  /** Legacy endpoint (kept for backward compatibility) */
   async analyzeLog(logFiles: File[]): Promise<any> {
     const formData = new FormData();
     logFiles.forEach(file => formData.append('logs', file));
@@ -111,10 +113,39 @@ class ApiClient {
     });
   }
 
+  /** New dashboard analysis with instrument memory */
+  async analyzeDashboard(instrumentId: number, logFiles: File[]): Promise<DashboardResult> {
+    const formData = new FormData();
+    formData.append('instrument_id', instrumentId.toString());
+    logFiles.forEach(file => formData.append('logs', file));
+
+    return this.fetch<DashboardResult>('/monitoring/dashboard/analyze', {
+      method: 'POST',
+      body: formData,
+      isFileUpload: true
+    });
+  }
+
+  /** Get list of instruments for the monitoring dropdown */
+  async getInstruments(): Promise<Instrument[]> {
+    return this.fetch<Instrument[]>('/monitoring/dashboard/instruments');
+  }
+
+  /** Get analysis history for an instrument */
+  async getInstrumentMemory(instrumentId: number): Promise<InstrumentMemoryResponse> {
+    return this.fetch<InstrumentMemoryResponse>(`/monitoring/dashboard/memory/${instrumentId}`);
+  }
+
+  /** Connect to the live dashboard stream (SSE) */
+  streamDashboard(instrumentId: number): EventSource {
+    return new EventSource(`${API_BASE_URL}/monitoring/dashboard/stream/${instrumentId}`);
+  }
+
   async getMonitoringLogs(): Promise<any[]> {
     return this.fetch<any[]>('/monitoring/logs');
   }
 
+  // --- System ---
   async getActivities(): Promise<ActivityLog[]> {
     const response = await this.fetch<PaginatedResponse<ActivityLog>>('/system/activities');
     return response.items || [];
