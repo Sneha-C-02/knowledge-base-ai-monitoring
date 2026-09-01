@@ -160,7 +160,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
             api_key=settings.answer_generation_provider_api_key,
             model_name=settings.answer_generation_model_name,
             timeout=settings.answer_generation_timeout_seconds,
-            calls_per_minute=settings.groq_rate_limit_calls_per_minute
+            calls_per_minute=settings.groq_rate_limit_calls_per_minute,
+            tokens_per_minute=settings.groq_rate_limit_tokens_per_minute,
+            max_analyzed_log_lines=settings.max_analyzed_log_lines,
+            max_ai_chunks=settings.max_ai_chunks,
+            log_reduction_context_lines=settings.log_reduction_context_lines,
+            log_reduction_tail_lines=settings.log_reduction_tail_lines
         )
     else:
         dashboard_analysis_service = providers.Singleton(
@@ -168,7 +173,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
             api_key=settings.answer_generation_provider_api_key or "",
             model_name=settings.answer_generation_model_name or "llama3-8b-8192",
             timeout=settings.answer_generation_timeout_seconds,
-            calls_per_minute=settings.groq_rate_limit_calls_per_minute
+            calls_per_minute=settings.groq_rate_limit_calls_per_minute,
+            tokens_per_minute=settings.groq_rate_limit_tokens_per_minute,
+            max_analyzed_log_lines=settings.max_analyzed_log_lines,
+            max_ai_chunks=settings.max_ai_chunks,
+            log_reduction_context_lines=settings.log_reduction_context_lines,
+            log_reduction_tail_lines=settings.log_reduction_tail_lines
         )
     
     # Use Cases
@@ -244,7 +254,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ContinuousMonitoringService,
         session_factory=providers.Object(None), # Will be set in application factory
         storage=persistent_file_storage,
-        analyze_use_case=analyze_logs_with_memory_use_case,
+        analyze_use_case_factory=analyze_logs_with_memory_use_case.provider,
         event_bus=event_bus,
         polling_interval_seconds=15
     )

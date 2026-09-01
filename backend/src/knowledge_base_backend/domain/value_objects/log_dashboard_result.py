@@ -17,6 +17,14 @@ class LogDashboardResult:
     warnings: int
     errors: int
     healthy_apps: int
+    files_analyzed: int
     daily_summary_bullets: List[DashboardSummaryBullet] = field(default_factory=list)
     overall_status: str = "OK"
-    files_analyzed: int = 0
+    analysis_status: str = "FULL_AI_ANALYSIS"
+    total_chunks: int = 1
+    successful_ai_chunks: int = 1
+    fallback_chunks: int = 0
+    failed_chunks: int = 0
+    original_line_count: Optional[int] = None
+    analyzed_line_count: Optional[int] = None
+    was_log_reduced: bool = False

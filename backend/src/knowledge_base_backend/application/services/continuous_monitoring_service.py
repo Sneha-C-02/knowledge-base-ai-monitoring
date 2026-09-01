@@ -24,13 +24,13 @@ class ContinuousMonitoringService:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         storage: PersistentFileStorage,
-        analyze_use_case: AnalyzeLogsWithMemoryUseCase,
+        analyze_use_case_factory,
         event_bus: EventBus,
         polling_interval_seconds: int = 15
     ):
         self.session_factory = session_factory
         self.storage = storage
-        self.analyze_use_case = analyze_use_case
+        self.analyze_use_case_factory = analyze_use_case_factory
         self.event_bus = event_bus
         self.polling_interval_seconds = polling_interval_seconds
         self._running = False
@@ -115,7 +115,8 @@ class ContinuousMonitoringService:
                         token = session_context.set(session)
                         
                         try:
-                            dashboard_result = await self.analyze_use_case._process_single_file(
+                            analyze_use_case = self.analyze_use_case_factory()
+                            dashboard_result = await analyze_use_case._process_single_file(
                                 path=file_path,
                                 filename=monitored.filename,
                                 instrument_id=monitored.instrument_id,

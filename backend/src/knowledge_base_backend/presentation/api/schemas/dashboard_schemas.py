@@ -22,6 +22,14 @@ class LogDashboardResponse(BaseModel):
     overall_status: str
     files_analyzed: int
     daily_summary_bullets: List[DashboardSummaryBulletSchema]
+    analysis_status: str = "FULL_AI_ANALYSIS"
+    total_chunks: int = 1
+    successful_ai_chunks: int = 1
+    fallback_chunks: int = 0
+    failed_chunks: int = 0
+    original_line_count: Optional[int] = None
+    analyzed_line_count: Optional[int] = None
+    was_log_reduced: bool = False
 
 
 class InstrumentMemoryEntrySchema(BaseModel):

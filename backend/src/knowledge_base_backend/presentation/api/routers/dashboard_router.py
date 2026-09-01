@@ -75,7 +75,15 @@ async def analyze_logs_with_dashboard(
         daily_summary_bullets=[
             DashboardSummaryBulletSchema(text=b.text, severity=b.severity)
             for b in result.daily_summary_bullets
-        ]
+        ],
+        analysis_status=result.analysis_status,
+        total_chunks=result.total_chunks,
+        successful_ai_chunks=result.successful_ai_chunks,
+        fallback_chunks=result.fallback_chunks,
+        failed_chunks=result.failed_chunks,
+        original_line_count=result.original_line_count,
+        analyzed_line_count=result.analyzed_line_count,
+        was_log_reduced=result.was_log_reduced
     )
 
 
@@ -151,7 +159,15 @@ async def stream_dashboard_updates(
                     "daily_summary_bullets": [
                         {"text": b.text, "severity": b.severity}
                         for b in dashboard_result.daily_summary_bullets
-                    ]
+                    ],
+                    "analysis_status": dashboard_result.analysis_status,
+                    "total_chunks": getattr(dashboard_result, 'total_chunks', 1),
+                    "successful_ai_chunks": getattr(dashboard_result, 'successful_ai_chunks', 1),
+                    "fallback_chunks": getattr(dashboard_result, 'fallback_chunks', 0),
+                    "failed_chunks": getattr(dashboard_result, 'failed_chunks', 0),
+                    "original_line_count": getattr(dashboard_result, 'original_line_count', None),
+                    "analyzed_line_count": getattr(dashboard_result, 'analyzed_line_count', None),
+                    "was_log_reduced": getattr(dashboard_result, 'was_log_reduced', False)
                 }
                 
                 yield f"data: {json.dumps(data)}\n\n"

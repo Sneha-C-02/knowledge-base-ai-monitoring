@@ -78,6 +78,14 @@ export interface DashboardResult {
   overall_status: 'CRITICAL' | 'WARNING' | 'OK';
   files_analyzed: number;
   daily_summary_bullets: DashboardBullet[];
+  analysis_status?: string;
+  total_chunks?: number;
+  successful_ai_chunks?: number;
+  fallback_chunks?: number;
+  failed_chunks?: number;
+  original_line_count?: number;
+  analyzed_line_count?: number;
+  was_log_reduced?: boolean;
 }
 
 export interface InstrumentMemoryEntry {

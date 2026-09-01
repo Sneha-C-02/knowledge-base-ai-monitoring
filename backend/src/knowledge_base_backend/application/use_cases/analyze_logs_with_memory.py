@@ -117,6 +117,43 @@ class AnalyzeLogsWithMemoryUseCase:
             aggregated_result.healthy_apps = max(aggregated_result.healthy_apps, result.healthy_apps)
             aggregated_result.daily_summary_bullets.extend(result.daily_summary_bullets)
             aggregated_result.files_analyzed += 1
+            
+            # Aggregate analysis status and chunks
+            if not hasattr(aggregated_result, 'total_chunks'):
+                aggregated_result.total_chunks = 0
+                aggregated_result.successful_ai_chunks = 0
+                aggregated_result.fallback_chunks = 0
+                aggregated_result.failed_chunks = 0
+            
+            # If aggregated_result was just initialized, its total_chunks is 1 by default, let's reset it on first real file
+            if aggregated_result.files_analyzed == 1:
+                aggregated_result.total_chunks = result.total_chunks
+                aggregated_result.successful_ai_chunks = result.successful_ai_chunks
+                aggregated_result.fallback_chunks = getattr(result, 'fallback_chunks', 0)
+                aggregated_result.failed_chunks = getattr(result, 'failed_chunks', 0)
+                aggregated_result.analysis_status = result.analysis_status
+                aggregated_result.original_line_count = result.original_line_count
+                aggregated_result.analyzed_line_count = result.analyzed_line_count
+                aggregated_result.was_log_reduced = result.was_log_reduced
+            else:
+                aggregated_result.total_chunks += getattr(result, 'total_chunks', 1)
+                aggregated_result.successful_ai_chunks += getattr(result, 'successful_ai_chunks', 1)
+                aggregated_result.fallback_chunks += getattr(result, 'fallback_chunks', 0)
+                aggregated_result.failed_chunks += getattr(result, 'failed_chunks', 0)
+                if result.original_line_count:
+                    aggregated_result.original_line_count = (aggregated_result.original_line_count or 0) + result.original_line_count
+                if result.analyzed_line_count:
+                    aggregated_result.analyzed_line_count = (aggregated_result.analyzed_line_count or 0) + result.analyzed_line_count
+                if result.was_log_reduced:
+                    aggregated_result.was_log_reduced = True
+                
+                # Downgrade status if any file had a partial or failed status
+                if result.analysis_status == "AI_ANALYSIS_FAILED":
+                    aggregated_result.analysis_status = "AI_ANALYSIS_FAILED"
+                elif result.analysis_status == "DETERMINISTIC_FALLBACK" and aggregated_result.analysis_status != "AI_ANALYSIS_FAILED":
+                    aggregated_result.analysis_status = "DETERMINISTIC_FALLBACK"
+                elif result.analysis_status == "PARTIAL_AI_ANALYSIS" and aggregated_result.analysis_status not in ["AI_ANALYSIS_FAILED", "DETERMINISTIC_FALLBACK"]:
+                    aggregated_result.analysis_status = "PARTIAL_AI_ANALYSIS"
 
             if result.overall_status == "CRITICAL":
                 aggregated_result.overall_status = "CRITICAL"
@@ -171,7 +208,8 @@ class AnalyzeLogsWithMemoryUseCase:
                 log_content=full_content,
                 existing_summary=None,
                 log_filename=filename,
-                instrument_name=instrument_name
+                instrument_name=instrument_name,
+                instrument_id=instrument_id
             )
 
             # Save the MonitoredLogFile record
@@ -208,7 +246,10 @@ class AnalyzeLogsWithMemoryUseCase:
                         )
                     ],
                     overall_status="OK",
-                    files_analyzed=1
+                    files_analyzed=1,
+                    original_line_count=total_lines,
+                    analyzed_line_count=total_lines,
+                    was_log_reduced=False
                 )
             else:
                 # Extract only the NEW lines
@@ -229,7 +270,8 @@ class AnalyzeLogsWithMemoryUseCase:
                     log_content=new_content,
                     existing_summary=monitored.full_context_summary,
                     log_filename=filename,
-                    instrument_name=instrument_name
+                    instrument_name=instrument_name,
+                    instrument_id=instrument_id
                 )
 
                 # Update the MonitoredLogFile record

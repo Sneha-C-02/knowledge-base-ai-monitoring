@@ -169,7 +169,39 @@ export function MonitoringPage() {
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getAnalysisStatusBadge = (result: DashboardResult) => {
+  if (!result.analysis_status) return null;
+  
+  let label = "AI Analysis: Unknown";
+  let colorClass = "bg-gray-100 text-gray-800";
+  
+  switch(result.analysis_status) {
+    case 'FULL_AI_ANALYSIS':
+      label = "AI Analysis: Complete";
+      colorClass = "bg-green-100 text-green-800 border border-green-200";
+      break;
+    case 'PARTIAL_AI_ANALYSIS':
+      label = `AI Analysis: Partial (${result.fallback_chunks || 0}/${result.total_chunks || 0} fallback)`;
+      colorClass = "bg-yellow-100 text-yellow-800 border border-yellow-200";
+      break;
+    case 'DETERMINISTIC_FALLBACK':
+      label = "AI Analysis: Fallback";
+      colorClass = "bg-orange-100 text-orange-800 border border-orange-200";
+      break;
+    case 'AI_ANALYSIS_FAILED':
+      label = "AI Analysis: Failed";
+      colorClass = "bg-red-100 text-red-800 border border-red-200";
+      break;
+  }
+  
+  return (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ml-3 ${colorClass}`}>
+      {label}
+    </span>
+  );
+};
+
+const getStatusColor = (status: string) => {
     switch (status) {
       case 'CRITICAL': return 'text-red-700 bg-red-50 border-red-200';
       case 'WARNING': return 'text-amber-700 bg-amber-50 border-amber-200';
@@ -316,9 +348,15 @@ export function MonitoringPage() {
                           <Radio size={12} className="mr-1" /> LIVE
                         </span>
                       )}
+                      {getAnalysisStatusBadge(result)}
                     </div>
-                    <p className="text-sm opacity-75">
-                      {result.files_analyzed} file(s) monitored • AI-powered continuous diagnostics
+                                        <p className="text-sm opacity-75 flex flex-wrap items-center gap-2 mt-0.5">
+                      <span>{result.files_analyzed} file(s) monitored • AI continuous diagnostics</span>
+                      {result.was_log_reduced && result.analyzed_line_count && result.original_line_count && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-normal bg-slate-200/80 text-slate-800 border border-slate-300/60">
+                          Analyzed {result.analyzed_line_count.toLocaleString()} of {result.original_line_count.toLocaleString()} lines (diagnostic focus)
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>

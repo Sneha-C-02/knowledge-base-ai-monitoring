@@ -1,3 +1,4 @@
+from dependency_injector import providers
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.knowledge_base_backend.configuration.application_settings import settings
@@ -39,7 +40,7 @@ def create_application() -> FastAPI:
             container.continuous_monitoring_service.cls,
             session_factory=async_session_factory,
             storage=container.persistent_file_storage,
-            analyze_use_case=container.analyze_logs_with_memory_use_case,
+            analyze_use_case_factory=container.analyze_logs_with_memory_use_case.provider,
             event_bus=container.event_bus,
             polling_interval_seconds=15
         )

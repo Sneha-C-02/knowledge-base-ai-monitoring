@@ -58,6 +58,16 @@ class ApplicationSettings(BaseSettings):
     answer_generation_timeout_seconds: int = 60
     
     groq_rate_limit_calls_per_minute: int = 30
+    groq_rate_limit_tokens_per_minute: int = 7000
+    
+    log_analysis_max_input_tokens: int = 6000
+    log_analysis_chunk_target_tokens: int = 4000
+    log_analysis_max_concurrent_chunks: int = 2
+    
+    max_analyzed_log_lines: int = 600
+    max_ai_chunks: int = 4
+    log_reduction_context_lines: int = 2
+    log_reduction_tail_lines: int = 100
 
     monitoring_explanation_provider: str = "disabled"
     monitoring_explanation_model_name: Optional[str] = None
