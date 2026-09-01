@@ -114,10 +114,11 @@ class ApiClient {
   }
 
   /** New dashboard analysis with instrument memory */
-  async analyzeDashboard(instrumentId: number, logFiles: File[]): Promise<DashboardResult> {
+  async analyzeLogs(files: File[]): Promise<DashboardResult> {
     const formData = new FormData();
-    formData.append('instrument_id', instrumentId.toString());
-    logFiles.forEach(file => formData.append('logs', file));
+    files.forEach(file => {
+      formData.append('logs', file);
+    });
 
     return this.fetch<DashboardResult>('/monitoring/dashboard/analyze', {
       method: 'POST',

@@ -14,7 +14,7 @@ packages = [{include = "knowledge_base_backend", from = "src"}]
 python = "^3.11"
 fastapi = "^0.109.0"
 uvicorn = {extras = ["standard"], version = "^0.27.0"}
-bcrypt = "3.2.2"
+bcrypt = "^4.0.1"
 pydantic = "^2.5.3"
 pydantic-settings = "^2.1.0"
 sqlalchemy = "^2.0.25"

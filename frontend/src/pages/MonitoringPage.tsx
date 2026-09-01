@@ -9,8 +9,6 @@ import { api } from '../api/client';
 import type { Instrument, DashboardResult, InstrumentMemoryResponse } from '../types';
 
 export function MonitoringPage() {
-  const [instruments, setInstruments] = useState<Instrument[]>([]);
-  const [selectedInstrumentId, setSelectedInstrumentId] = useState<number | ''>('');
   const [logFiles, setLogFiles] = useState<(File | null)[]>([null]);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [result, setResult] = useState<DashboardResult | null>(null);
@@ -22,22 +20,13 @@ export function MonitoringPage() {
   
   const MAX_LOGS = 10;
 
-  // Fetch instruments for the dropdown
-  useEffect(() => {
-    api.getInstruments()
-      .then(setInstruments)
-      .catch(err => {
-        console.error('Failed to fetch instruments:', err);
-      });
-  }, []);
-
   // Setup SSE for live continuous monitoring
   useEffect(() => {
     let eventSource: EventSource | null = null;
     
-    if (result && selectedInstrumentId && !isMonitoring) {
+    if (result && result.instrument_id && !isMonitoring) {
       setIsLive(true);
-      eventSource = api.streamDashboard(selectedInstrumentId as number);
+      eventSource = api.streamDashboard(result.instrument_id);
       
       eventSource.onmessage = (event) => {
         try {
@@ -45,8 +34,8 @@ export function MonitoringPage() {
           setResult(data);
           
           // Optionally refetch memory history automatically when a new analysis is complete
-          if (showMemory) {
-            api.getInstrumentMemory(selectedInstrumentId as number).then(setMemory);
+          if (showMemory && result?.instrument_id) {
+            api.getInstrumentMemory(result.instrument_id).then(setMemory);
           }
           
           // Show toast for incremental updates
@@ -76,16 +65,11 @@ export function MonitoringPage() {
         setIsLive(false);
       }
     };
-  }, [result?.instrument_id, selectedInstrumentId, isMonitoring, showMemory, addNotification]);
+  }, [result?.instrument_id, isMonitoring, showMemory, addNotification]);
 
   const handleStartMonitoring = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    
-    if (!selectedInstrumentId) {
-      setError("Please select an instrument.");
-      return;
-    }
 
     const validFiles = logFiles.filter((f): f is File => f !== null);
     if (validFiles.length === 0) {
@@ -100,15 +84,15 @@ export function MonitoringPage() {
 
     addActivity({
       type: 'LOG_FILE_SUBMITTED',
-      message: `Log analysis started for instrument #${selectedInstrumentId}`,
+      message: `Log analysis started`,
       user: 'Current User',
       severity: 'INFO',
-      metadata: { filenames: validFiles.map(f => f.name).join(', '), instrument_id: selectedInstrumentId }
+      metadata: { filenames: validFiles.map(f => f.name).join(', ') }
     });
 
     const processLog = async () => {
       try {
-        const dashboardResult = await api.analyzeDashboard(selectedInstrumentId as number, validFiles);
+        const dashboardResult = await api.analyzeLogs(validFiles);
         setResult(dashboardResult);
         
         updateStats({ 
@@ -159,13 +143,19 @@ export function MonitoringPage() {
   };
 
   const handleViewMemory = async () => {
-    if (!selectedInstrumentId) return;
-    try {
-      const memoryData = await api.getInstrumentMemory(selectedInstrumentId as number);
-      setMemory(memoryData);
-      setShowMemory(true);
-    } catch (err) {
-      console.error('Failed to fetch instrument memory:', err);
+    if (showMemory && result?.instrument_id) {
+      setShowMemory(false);
+    } else if (result?.instrument_id) {
+      setIsLoadingMemory(true);
+      try {
+        const memoryData = await api.getInstrumentMemory(result.instrument_id);
+        setMemory(memoryData);
+        setShowMemory(true);
+      } catch (err) {
+        console.error('Failed to fetch instrument memory:', err);
+      } finally {
+        setIsLoadingMemory(false);
+      }
     }
   };
 
@@ -229,9 +219,9 @@ const getStatusColor = (status: string) => {
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-800">Proactive Log Monitoring</h1>
-        {selectedInstrumentId && (
-          <Button variant="outline" onClick={handleViewMemory} className="text-sm">
-            <History size={16} className="mr-2" /> View Analysis History
+        {result && (
+          <Button variant="outline" onClick={handleViewMemory} className="text-sm" isLoading={isLoadingMemory}>
+            <History size={16} className="mr-2" /> {showMemory ? 'Hide History' : 'View Analysis History'}
           </Button>
         )}
       </div>
@@ -240,24 +230,6 @@ const getStatusColor = (status: string) => {
       <Card>
         <CardContent className="p-6">
           <form onSubmit={handleStartMonitoring} className="space-y-4">
-            {/* Instrument Selector */}
-            <div>
-              <label htmlFor="instrument-select" className="block text-sm font-medium text-slate-700 mb-2">
-                Select Instrument
-              </label>
-              <select
-                id="instrument-select"
-                value={selectedInstrumentId}
-                onChange={(e) => setSelectedInstrumentId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full h-10 px-3 border border-slate-300 rounded-md bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                disabled={isMonitoring}
-              >
-                <option value="">-- Select an instrument --</option>
-                {instruments.map(inst => (
-                  <option key={inst.id} value={inst.id}>{inst.name}</option>
-                ))}
-              </select>
-            </div>
 
             {/* File Upload */}
             <div>

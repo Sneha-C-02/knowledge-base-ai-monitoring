@@ -1,6 +1,7 @@
 from typing import List, BinaryIO, Tuple
 import datetime
 import json
+import re
 import aiofiles
 
 from src.knowledge_base_backend.domain.services.log_file_validator import LogFileValidator
@@ -60,9 +61,33 @@ class AnalyzeLogsWithMemoryUseCase:
         self.monitored_file_repository = monitored_file_repository
         self.date_time_provider = date_time_provider
 
+    async def _extract_instrument_name(self, stream: BinaryIO) -> str:
+        pos = stream.tell()
+        stream.seek(0)
+        
+        # Read the first few lines to find the instrument tag
+        lines = []
+        for _ in range(10):
+            line = stream.readline()
+            if not line:
+                break
+            lines.append(line.decode('utf-8', errors='ignore'))
+            
+        stream.seek(pos)  # Reset stream position
+        
+        # Look for the first bracketed text after the timestamp colon
+        # Example: "Mon Oct 20 11:32:42 AM GMT Summer Time: [EPC]"
+        for line in lines:
+            match = re.search(r":\s+\[(.*?)\]", line)
+            if match:
+                name = match.group(1).strip()
+                if name:
+                    return name
+                    
+        return "Unknown Instrument"
+
     async def execute(
         self,
-        instrument_id: int,
         files: List[Tuple[str, BinaryIO]]
     ) -> LogDashboardResult:
         if not files:
@@ -71,10 +96,16 @@ class AnalyzeLogsWithMemoryUseCase:
         if len(files) > 10:
             raise ValueError("Maximum 10 files allowed per analysis run")
 
-        # --- Step 1: Validate instrument exists ---
-        instrument = await self.instrument_repository.get_by_id(instrument_id)
+        # --- Step 1: Detect instrument from the first file ---
+        first_filename, first_stream = files[0]
+        instrument_name = await self._extract_instrument_name(first_stream)
+        
+        instrument = await self.instrument_repository.get_by_name(instrument_name)
         if instrument is None:
-            raise ValueError(f"Instrument with ID {instrument_id} not found")
+            # Create the instrument dynamically if it doesn't exist
+            instrument = await self.instrument_repository.create(instrument_name)
+            
+        instrument_id = instrument.id
 
         # --- Step 2: Store uploaded files temporarily ---
         stored_paths = []

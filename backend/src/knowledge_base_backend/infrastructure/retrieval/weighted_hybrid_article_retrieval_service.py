@@ -1,25 +1,31 @@
 import asyncio
 import re
+import logging
 from typing import List, Optional, Dict
 from src.knowledge_base_backend.domain.services.hybrid_article_retrieval_service import HybridArticleRetrievalService
 from src.knowledge_base_backend.domain.value_objects.relevant_article_match import RelevantArticleMatch
 from src.knowledge_base_backend.domain.repositories.article_repository import ArticleRepository
 from src.knowledge_base_backend.domain.repositories.article_vector_search_repository import ArticleVectorSearchRepository
+from src.knowledge_base_backend.domain.repositories.log_event_vector_repository import LogEventVectorRepository
 from src.knowledge_base_backend.domain.services.embedding_generation_service import EmbeddingGenerationService
 from src.knowledge_base_backend.domain.value_objects.article_search_criteria import ArticleSearchCriteria
 from src.knowledge_base_backend.configuration.application_settings import settings
 import math
 
+logger = logging.getLogger(__name__)
+
 class WeightedHybridArticleRetrievalService(HybridArticleRetrievalService):
     def __init__(
-        self, 
+        self,
         article_repository: ArticleRepository,
         vector_repository: ArticleVectorSearchRepository,
-        embedding_service: EmbeddingGenerationService
+        embedding_service: EmbeddingGenerationService,
+        log_event_vector_repository: LogEventVectorRepository | None = None
     ) -> None:
         self.article_repository = article_repository
         self.vector_repository = vector_repository
         self.embedding_service = embedding_service
+        self.log_event_vector_repository = log_event_vector_repository
 
     def _extract_product_tokens(self, text: str) -> List[str]:
         tokens = []
@@ -181,4 +187,34 @@ class WeightedHybridArticleRetrievalService(HybridArticleRetrievalService):
         sorted_matches = sorted(article_map.values(), key=lambda x: x.combined_relevance_score, reverse=True)
         final_matches = [m for m in sorted_matches if is_sufficiently_relevant(m)]
         
+        # --- Log event vector search (augments, never replaces KB results) ---
+        if self.log_event_vector_repository and settings.vector_search_enabled:
+            try:
+                log_matches = await self.log_event_vector_repository.search_by_vector(
+                    query_embedding=query_embedding if query_embedding else await self.embedding_service.generate_text_embedding(query),
+                    min_similarity=settings.vector_similarity_threshold,
+                    limit=3,
+                )
+                if log_matches:
+                    logger.info(f"Found {len(log_matches)} similar past log incidents for query")
+                    # We don't mix log matches into article results — they're surfaced
+                    # as metadata on the first article match so the LLM can reference them.
+                    if final_matches:
+                        incident_context = " | ".join(
+                            f"[{m.severity.upper()} in {m.log_filename}: {m.cleaned_text}]"
+                            for m in log_matches[:2]
+                        )
+                        first = final_matches[0]
+                        final_matches[0] = RelevantArticleMatch(
+                            article=first.article,
+                            matched_instruments=first.matched_instruments,
+                            full_text_score=first.full_text_score,
+                            vector_similarity_score=first.vector_similarity_score,
+                            combined_relevance_score=first.combined_relevance_score,
+                            retrieval_method=first.retrieval_method,
+                            retrieval_reason=first.retrieval_reason + f" | Similar past incident: {incident_context}"
+                        )
+            except Exception as e:
+                logger.warning(f"Log event vector search failed (non-fatal): {e}")
+
         return final_matches[:limit]

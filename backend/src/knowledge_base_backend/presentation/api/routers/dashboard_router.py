@@ -44,7 +44,6 @@ async def list_instruments(
 @router.post("/analyze", response_model=LogDashboardResponse)
 @inject
 async def analyze_logs_with_dashboard(
-    instrument_id: int = Form(...),
     logs: List[UploadFile] = File(...),
     token: str = Depends(get_current_user_token),
     use_case: AnalyzeLogsWithMemoryUseCase = Depends(
@@ -61,7 +60,7 @@ async def analyze_logs_with_dashboard(
     new content using the stored context, and updates the memory.
     """
     files = [(log.filename, log.file) for log in logs]
-    result = await use_case.execute(instrument_id=instrument_id, files=files)
+    result = await use_case.execute(files=files)
 
     return LogDashboardResponse(
         instrument_id=result.instrument_id,

@@ -31,3 +31,11 @@ class SqlAlchemyInstrumentRepository(InstrumentRepository):
         result = await self.session.execute(query)
         models = result.scalars().all()
         return [self._map_to_domain(model) for model in models]
+
+    async def create(self, name: str) -> Instrument:
+        model = InstrumentModel(name=name)
+        self.session.add(model)
+        await self.session.flush()
+        # We flush so that the model gets its ID populated, but the actual 
+        # commit is handled by the caller/middleware.
+        return self._map_to_domain(model)

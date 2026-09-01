@@ -13,6 +13,9 @@ from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_monitoring_repository import SqlAlchemyMonitoringRepository
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_instrument_memory_repository import SqlAlchemyInstrumentMemoryRepository
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_monitored_log_file_repository import SqlAlchemyMonitoredLogFileRepository
+from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_log_event_vector_repository import SqlAlchemyLogEventVectorRepository
+
+from src.knowledge_base_backend.domain.services.log_keyword_extractor import LogKeywordExtractor
 
 from src.knowledge_base_backend.infrastructure.authentication.jwt_authentication_token_service import JwtAuthenticationTokenService
 from src.knowledge_base_backend.infrastructure.authentication.argon2_password_hashing_service import Argon2PasswordHashingService
@@ -70,6 +73,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     monitoring_repository = providers.Factory(SqlAlchemyMonitoringRepository, session=db_session)
     instrument_memory_repository = providers.Factory(SqlAlchemyInstrumentMemoryRepository, session=db_session)
     monitored_log_file_repository = providers.Factory(SqlAlchemyMonitoredLogFileRepository, session=db_session)
+    log_event_vector_repository = providers.Factory(SqlAlchemyLogEventVectorRepository, session=db_session)
 
     # Core Services
     date_time_provider = providers.Singleton(UtcDateTimeProvider)
@@ -118,7 +122,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
             WeightedHybridArticleRetrievalService,
             article_repository=article_repository,
             vector_repository=article_vector_repository,
-            embedding_service=embedding_generation_service
+            embedding_service=embedding_generation_service,
+            log_event_vector_repository=log_event_vector_repository
         )
     else:
         hybrid_retrieval_service = providers.Singleton(
@@ -136,6 +141,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     temporary_file_storage = providers.Singleton(LocalTemporaryFileStorage)
     persistent_file_storage = providers.Singleton(LocalPersistentFileStorage)
     log_parser = providers.Singleton(PlainTextLogContentParser)
+    log_keyword_extractor = providers.Singleton(LogKeywordExtractor)
     
     if settings.answer_generation_provider == "groq":
         log_analysis_service = providers.Singleton(
@@ -213,7 +219,10 @@ class ApplicationContainer(containers.DeclarativeContainer):
         storage=temporary_file_storage,
         analysis_service=log_analysis_service,
         repository=monitoring_repository,
-        notification_repository=notification_repository
+        notification_repository=notification_repository,
+        keyword_extractor=log_keyword_extractor,
+        embedding_service=embedding_generation_service,
+        log_event_vector_repository=log_event_vector_repository
     )
     
     analyze_logs_with_memory_use_case = providers.Factory(
