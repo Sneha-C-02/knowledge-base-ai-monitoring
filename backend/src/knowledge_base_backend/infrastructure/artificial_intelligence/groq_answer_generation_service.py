@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import time
 from collections import deque
 import httpx
@@ -7,7 +7,7 @@ from src.knowledge_base_backend.domain.services.grounded_answer_generation_servi
 class GroqAnswerGenerationService(GroundedAnswerGenerationService):
     def __init__(self, api_key: str, model_name: str, timeout: int, calls_per_minute: int) -> None:
         self.api_key = api_key
-        self.model_name = model_name or "llama3-8b-8192"
+        self.model_name = model_name or "groq/compound-mini"
         self.timeout = timeout
         self.client = httpx.AsyncClient(timeout=timeout)
         self.calls_per_minute = calls_per_minute

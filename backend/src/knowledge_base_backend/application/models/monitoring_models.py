@@ -16,6 +16,8 @@ class MonitoringIssueDto:
     recommended_action: str
     related_article: Optional[str]
     related_article_url: Optional[str]
+    confidence_score: Optional[int]
+    possible_root_causes: Optional[List[str]]
 
 @dataclass
 class MonitoringEventDto:

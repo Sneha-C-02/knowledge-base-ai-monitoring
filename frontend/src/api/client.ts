@@ -146,6 +146,20 @@ class ApiClient {
     return this.fetch<any[]>('/monitoring/logs');
   }
 
+  // --- Feedback ---
+  async submitFeedback(data: {
+    pattern_number: string;
+    ai_recommendation: string;
+    actual_action: string;
+    result: boolean;
+    helpful_points?: string;
+  }): Promise<any> {
+    return this.fetch<any>('/monitoring/dashboard/feedback', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
   // --- System ---
   async getActivities(): Promise<ActivityLog[]> {
     const response = await this.fetch<PaginatedResponse<ActivityLog>>('/system/activities');

@@ -14,6 +14,7 @@ from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_instrument_memory_repository import SqlAlchemyInstrumentMemoryRepository
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_monitored_log_file_repository import SqlAlchemyMonitoredLogFileRepository
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_log_event_vector_repository import SqlAlchemyLogEventVectorRepository
+from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_ai_learning_feedback_repository import SqlAlchemyAiLearningFeedbackRepository
 
 from src.knowledge_base_backend.domain.services.log_keyword_extractor import LogKeywordExtractor
 
@@ -74,6 +75,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     instrument_memory_repository = providers.Factory(SqlAlchemyInstrumentMemoryRepository, session=db_session)
     monitored_log_file_repository = providers.Factory(SqlAlchemyMonitoredLogFileRepository, session=db_session)
     log_event_vector_repository = providers.Factory(SqlAlchemyLogEventVectorRepository, session=db_session)
+    ai_learning_feedback_repository = providers.Factory(SqlAlchemyAiLearningFeedbackRepository, session=db_session)
 
     # Core Services
     date_time_provider = providers.Singleton(UtcDateTimeProvider)
@@ -152,7 +154,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
             calls_per_minute=settings.groq_rate_limit_calls_per_minute,
             parser=log_parser,
             date_time_provider=date_time_provider,
-            retrieval_service=hybrid_retrieval_service
+            retrieval_service=hybrid_retrieval_service,
+            feedback_repository=ai_learning_feedback_repository
         )
     else:
         log_analysis_service = providers.Singleton(
@@ -167,6 +170,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             model_name=settings.answer_generation_model_name,
             timeout=settings.answer_generation_timeout_seconds,
             calls_per_minute=settings.groq_rate_limit_calls_per_minute,
+            feedback_repository=ai_learning_feedback_repository,
             tokens_per_minute=settings.groq_rate_limit_tokens_per_minute,
             max_analyzed_log_lines=settings.max_analyzed_log_lines,
             max_ai_chunks=settings.max_ai_chunks,
@@ -177,7 +181,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         dashboard_analysis_service = providers.Singleton(
             GroqDashboardAnalysisService,
             api_key=settings.answer_generation_provider_api_key or "",
-            model_name=settings.answer_generation_model_name or "llama3-8b-8192",
+            model_name=settings.answer_generation_model_name or "groq/compound-mini",
             timeout=settings.answer_generation_timeout_seconds,
             calls_per_minute=settings.groq_rate_limit_calls_per_minute,
             tokens_per_minute=settings.groq_rate_limit_tokens_per_minute,

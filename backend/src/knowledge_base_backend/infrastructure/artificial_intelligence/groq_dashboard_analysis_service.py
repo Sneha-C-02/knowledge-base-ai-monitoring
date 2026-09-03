@@ -12,6 +12,7 @@ from src.knowledge_base_backend.domain.value_objects.log_dashboard_result import
 from src.knowledge_base_backend.domain.entities.instrument_memory_entry import InstrumentMemoryEntry
 from src.knowledge_base_backend.domain.services.log_chunker_service import LogChunkerService
 from src.knowledge_base_backend.domain.services.log_selection_service import LogSelectionService, SelectedLogContent
+from src.knowledge_base_backend.domain.repositories.ai_learning_feedback_repository import AiLearningFeedbackRepository
 
 
 def robust_parse_json(content: str) -> dict:
@@ -56,14 +57,15 @@ class GroqDashboardAnalysisService:
     def __init__(
         self,
         api_key: str,
-        model_name: str = "llama3-8b-8192",
+        model_name: str = "groq/compound-mini",
         timeout: int = 60,
         calls_per_minute: int = 30,
         tokens_per_minute: int = 7000,
         max_analyzed_log_lines: int = 600,
         max_ai_chunks: int = 4,
         log_reduction_context_lines: int = 2,
-        log_reduction_tail_lines: int = 100
+        log_reduction_tail_lines: int = 100,
+        feedback_repository: AiLearningFeedbackRepository = None
     ):
         self.api_key = api_key
         self.model_name = model_name
@@ -78,6 +80,7 @@ class GroqDashboardAnalysisService:
             context_lines=log_reduction_context_lines,
             tail_lines=log_reduction_tail_lines
         )
+        self.feedback_repository = feedback_repository
 
         self._call_timestamps = deque()
         self._token_timestamps = deque()
@@ -210,7 +213,10 @@ class GroqDashboardAnalysisService:
             if isinstance(b, dict):
                 bullets.append(DashboardSummaryBullet(
                     text=b.get("text", ""),
-                    severity=b.get("severity", "info")
+                    severity=b.get("severity", "info"),
+                    confidence_score=b.get("confidence_score"),
+                    possible_root_causes=b.get("possible_root_causes"),
+                    pattern_name=b.get("pattern_name")
                 ))
             elif isinstance(b, str):
                 bullets.append(DashboardSummaryBullet(text=b, severity="info"))
@@ -325,6 +331,20 @@ class GroqDashboardAnalysisService:
     ) -> LogDashboardResult:
         memory_context = self._build_memory_context(memory_entries)
         
+        feedback_context = ""
+        if self.feedback_repository:
+            # Note: Because this is an async operation inside a synchronous-looking function (wait, synthesize is async)
+            recent_feedbacks = await self.feedback_repository.get_recent_successful_feedback(limit=10)
+            if recent_feedbacks:
+                feedback_lines = ["\nLEARNED PATTERNS FROM HUMAN FEEDBACK:"]
+                for fb in recent_feedbacks:
+                    feedback_lines.append(
+                        f"- Pattern: {fb.pattern_number} | "
+                        f"Actual Root Cause/Action taken by engineer: {fb.actual_action} | "
+                        f"Notes: {fb.helpful_points or 'None'}"
+                    )
+                feedback_context = "\n".join(feedback_lines)
+
         system_prompt = (
             "You are an advanced AI diagnostics engineer. "
             "A large log file was split into chunks and analyzed individually. "
@@ -343,10 +363,11 @@ class GroqDashboardAnalysisService:
             '  "healthy_apps": <integer count of healthy components>,\n'
             '  "overall_status": "CRITICAL" or "WARNING" or "OK",\n'
             '  "daily_summary_bullets": [\n'
-            '    {"text": "concise synthesized finding", "severity": "critical" or "warning" or "info"},\n'
+            '    {"text": "concise synthesized finding", "severity": "critical" or "warning" or "info", "confidence_score": <1-100 integer>, "possible_root_causes": ["reason 1", "reason 2"], "pattern_name": "short pattern name"},\n'
             '    ...\n'
             '  ]\n'
             "}\n"
+            f"{feedback_context}"
         )
 
         chunks_json = json.dumps(chunk_results, indent=2)

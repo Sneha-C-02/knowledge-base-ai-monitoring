@@ -14,3 +14,5 @@ class MonitoringIssue:
     event_timestamp: Optional[datetime] = None
     related_article_number: Optional[str] = None
     related_article_url: Optional[str] = None
+    confidence_score: Optional[int] = None
+    possible_root_causes: Optional[list[str]] = None

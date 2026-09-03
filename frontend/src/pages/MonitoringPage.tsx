@@ -1,12 +1,107 @@
 import { useState, useEffect } from 'react';
-import { Play, FileText, AlertTriangle, ShieldCheck, AlertCircle, Clock, Plus, X, Upload, Activity, History, Zap, CheckCircle2, Radio } from 'lucide-react';
+import { Play, FileText, AlertTriangle, ShieldCheck, AlertCircle, Clock, Plus, X, Upload, Activity, History, Zap, CheckCircle2, Radio, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSystem } from '../context/SystemContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { api } from '../api/client';
-import type { Instrument, DashboardResult, InstrumentMemoryResponse } from '../types';
+import type { Instrument, DashboardResult, InstrumentMemoryResponse, DashboardBullet } from '../types';
+
+function FeedbackForm({ bullet }: { bullet: DashboardBullet }) {
+  const [actualAction, setActualAction] = useState('');
+  const [helpfulPoints, setHelpfulPoints] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const { addNotification } = useSystem();
+
+  const handleSubmit = async (result: boolean) => {
+    setIsSubmitting(true);
+    setIsCorrect(result);
+    try {
+      await api.submitFeedback({
+        pattern_number: bullet.pattern_name || 'Unknown Pattern',
+        ai_recommendation: bullet.text,
+        actual_action: actualAction || (result ? 'Followed AI Recommendation' : 'Ignored AI Recommendation'),
+        result,
+        helpful_points: helpfulPoints
+      });
+      setSubmitted(true);
+      addNotification({
+        type: 'success',
+        title: 'Feedback Submitted',
+        message: 'Thank you! Your feedback will train the AI to be more accurate.'
+      });
+    } catch (err) {
+      console.error(err);
+      addNotification({
+        type: 'error',
+        title: 'Submission Failed',
+        message: 'Could not submit feedback.'
+      });
+      setIsCorrect(null);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md flex items-center gap-2 text-green-700 text-sm">
+        <CheckCircle2 size={16} />
+        Feedback saved! This pattern will be used to improve future AI diagnostics.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+      <h4 className="text-sm font-semibold text-slate-700 mb-2">Human Verification</h4>
+      <p className="text-xs text-slate-500 mb-4">Help the AI learn. Did this recommendation accurately solve the issue?</p>
+      
+      <div className="space-y-3">
+        <input 
+          type="text" 
+          value={actualAction}
+          onChange={(e) => setActualAction(e.target.value)}
+          placeholder="What action did you actually take? (Optional)" 
+          className="w-full text-sm border-slate-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+        />
+        <input 
+          type="text" 
+          value={helpfulPoints}
+          onChange={(e) => setHelpfulPoints(e.target.value)}
+          placeholder="Any helpful notes for next time? (Optional)" 
+          className="w-full text-sm border-slate-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+        />
+        
+        <div className="flex gap-2 pt-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleSubmit(true)}
+            isLoading={isSubmitting && isCorrect === true}
+            className="flex-1 text-green-700 border-green-200 hover:bg-green-50"
+          >
+            <ThumbsUp size={16} className="mr-2" />
+            AI was Correct
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleSubmit(false)}
+            isLoading={isSubmitting && isCorrect === false}
+            className="flex-1 text-red-700 border-red-200 hover:bg-red-50"
+          >
+            <ThumbsDown size={16} className="mr-2" />
+            AI was Incorrect
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function MonitoringPage() {
   const [logFiles, setLogFiles] = useState<(File | null)[]>([null]);
@@ -402,12 +497,47 @@ const getStatusColor = (status: string) => {
                     <div
                       key={idx}
                       className={clsx(
-                        "px-5 py-3 border-l-4 transition-colors",
+                        "px-5 py-4 border-l-4 transition-colors",
                         getBulletColor(bullet.severity)
                       )}
                     >
                       <div className="flex items-start gap-3">
-                        <span className="text-sm leading-relaxed">{bullet.text}</span>
+                        <div className="flex-1">
+                          <span className="text-sm font-medium leading-relaxed block mb-1">
+                            {bullet.pattern_name ? `[${bullet.pattern_name}] ` : ''} 
+                            {bullet.text}
+                          </span>
+                          
+                          {/* Confidence Score & Root Causes */}
+                          <div className="mt-2 text-xs text-slate-600 space-y-1">
+                            {bullet.confidence_score && (
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">AI Confidence:</span>
+                                <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full ${bullet.confidence_score > 80 ? 'bg-green-500' : bullet.confidence_score > 50 ? 'bg-yellow-500' : 'bg-red-500'}`} 
+                                    style={{ width: `${bullet.confidence_score}%` }}
+                                  />
+                                </div>
+                                <span>{bullet.confidence_score}%</span>
+                              </div>
+                            )}
+                            {bullet.possible_root_causes && bullet.possible_root_causes.length > 0 && (
+                              <div className="mt-1">
+                                <span className="font-semibold">Possible Root Causes:</span>
+                                <ul className="list-disc list-inside pl-1 mt-0.5 space-y-0.5">
+                                  {bullet.possible_root_causes.map((cause, cidx) => (
+                                    <li key={cidx}>{cause}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Feedback Verification Form */}
+                          <FeedbackForm bullet={bullet} />
+                        </div>
+                        
                         {bullet.severity && (
                           <Badge
                             variant={

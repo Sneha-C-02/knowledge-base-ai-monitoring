@@ -10,13 +10,16 @@ from src.knowledge_base_backend.presentation.api.schemas.dashboard_schemas impor
     DashboardSummaryBulletSchema,
     InstrumentMemoryResponse,
     InstrumentMemoryEntrySchema,
-    InstrumentSchema
+    InstrumentSchema,
+    AiLearningFeedbackSubmitSchema,
+    AiLearningFeedbackResponseSchema
 )
 from src.knowledge_base_backend.application.use_cases.analyze_logs_with_memory import AnalyzeLogsWithMemoryUseCase
 from src.knowledge_base_backend.bootstrap.dependency_container import ApplicationContainer
 from src.knowledge_base_backend.presentation.api.dependencies.authentication_dependencies import get_current_user_token
 from src.knowledge_base_backend.domain.repositories.instrument_memory_repository import InstrumentMemoryRepository
 from src.knowledge_base_backend.domain.repositories.instrument_repository import InstrumentRepository
+from src.knowledge_base_backend.domain.repositories.ai_learning_feedback_repository import AiLearningFeedbackRepository, AiLearningFeedback
 from src.knowledge_base_backend.infrastructure.events.event_bus import EventBus
 
 
@@ -177,3 +180,36 @@ async def stream_dashboard_updates(
             await event_bus.unsubscribe(topic, queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.post("/feedback", response_model=AiLearningFeedbackResponseSchema)
+@inject
+async def submit_ai_learning_feedback(
+    payload: AiLearningFeedbackSubmitSchema,
+    token: str = Depends(get_current_user_token),
+    feedback_repository: AiLearningFeedbackRepository = Depends(
+        Provide[ApplicationContainer.ai_learning_feedback_repository]
+    )
+):
+    """
+    Submit user verification feedback for an AI log analysis result.
+    This data is saved to be used as few-shot training examples for the AI.
+    """
+    feedback = AiLearningFeedback(
+        id=0,
+        pattern_number=payload.pattern_number,
+        ai_recommendation=payload.ai_recommendation,
+        actual_action=payload.actual_action,
+        result=payload.result,
+        helpful_points=payload.helpful_points
+    )
+    saved = await feedback_repository.save(feedback)
+    
+    return AiLearningFeedbackResponseSchema(
+        id=saved.id,
+        pattern_number=saved.pattern_number,
+        ai_recommendation=saved.ai_recommendation,
+        actual_action=saved.actual_action,
+        result=saved.result,
+        helpful_points=saved.helpful_points,
+        created_at=saved.created_at.isoformat() if saved.created_at else ""
+    )

@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import time
 from collections import deque
 import httpx
@@ -12,6 +12,7 @@ from src.knowledge_base_backend.domain.entities.monitoring_issue import Monitori
 from src.knowledge_base_backend.domain.entities.monitoring_event import MonitoringEvent
 from src.knowledge_base_backend.domain.services.date_time_provider import DateTimeProvider
 from src.knowledge_base_backend.domain.services.hybrid_article_retrieval_service import HybridArticleRetrievalService
+from src.knowledge_base_backend.domain.repositories.ai_learning_feedback_repository import AiLearningFeedbackRepository
 
 class GroqLogAnalysisService(LogAnalysisService):
     def __init__(
@@ -22,16 +23,18 @@ class GroqLogAnalysisService(LogAnalysisService):
         calls_per_minute: int,
         parser: LogContentParser, 
         date_time_provider: DateTimeProvider,
-        retrieval_service: HybridArticleRetrievalService
+        retrieval_service: HybridArticleRetrievalService,
+        feedback_repository: AiLearningFeedbackRepository = None
     ) -> None:
         self.api_key = api_key
-        self.model_name = model_name or "llama3-8b-8192"
+        self.model_name = model_name or "groq/compound-mini"
         self.timeout = timeout
         self.client = httpx.AsyncClient(timeout=timeout)
         self.calls_per_minute = calls_per_minute
         self.parser = parser
         self.date_time_provider = date_time_provider
         self.retrieval_service = retrieval_service
+        self.feedback_repository = feedback_repository
         
         # Rate limiting state
         self._call_timestamps = deque()
@@ -83,15 +86,33 @@ class GroqLogAnalysisService(LogAnalysisService):
             "Content-Type": "application/json"
         }
         
+        # Fetch feedback for Few-Shot Learning
+        feedback_context = ""
+        if self.feedback_repository:
+            recent_feedbacks = await self.feedback_repository.get_recent_successful_feedback(limit=10)
+            if recent_feedbacks:
+                feedback_lines = ["\nLEARNED PATTERNS FROM HUMAN FEEDBACK:"]
+                for fb in recent_feedbacks:
+                    feedback_lines.append(
+                        f"- Pattern: {fb.pattern_number} | "
+                        f"Actual Root Cause/Action taken by engineer: {fb.actual_action} | "
+                        f"Notes: {fb.helpful_points or 'None'}"
+                    )
+                feedback_context = "\n".join(feedback_lines)
+
         system_prompt = (
             "You are an advanced AI diagnostics engineer analyzing machine log files. "
             "Your job is to thoroughly analyze the provided logs and identify any anomalies, failures, warnings, or unexpected behaviors. "
             "Perform HIGH-LEVEL MONITORING: detect both explicit errors (e.g. ERROR, WARNING, Connection Lost) AND hidden anomalies (e.g. process taking longer than usual, weird INFO logs). "
             "Return a JSON array of issues under the key 'issues'. "
             "For each issue, include exactly these fields: "
-            "'severity' (WARNING or CRITICAL), 'pattern' (a short 3-5 word name of the issue), 'description' (detailed explanation of what happened), 'recommended_action' (actionable advice), and 'search_query' (a concise search string to query the knowledge base for this issue, e.g. 'Pressure error troubleshooting'). "
+            "'severity' (WARNING or CRITICAL), 'pattern' (a short 3-5 word name of the issue), 'description' (detailed explanation of what happened), "
+            "'confidence_score' (an integer from 1 to 100 indicating how confident you are in this detection), "
+            "'possible_root_causes' (a list of 1 to 3 strings explaining likely root causes), "
+            "'recommended_action' (actionable advice), and 'search_query' (a concise search string to query the knowledge base for this issue, e.g. 'Pressure error troubleshooting'). "
             "If the logs are perfectly normal, return an empty array for 'issues'. "
             "You MUST respond ONLY with a raw JSON object containing the 'issues' array. Do NOT wrap the JSON in markdown blocks (e.g. `json). Just the raw JSON."
+            f"{feedback_context}"
         )
         
         user_prompt = f"Logs:\n{logs_text}"
@@ -154,7 +175,9 @@ class GroqLogAnalysisService(LogAnalysisService):
                     recommended_action=ai_issue.get("recommended_action", "Investigate the logs."),
                     event_timestamp=current_time,
                     related_article_number=str(related_article_number) if related_article_number else None,
-                    related_article_url=None
+                    related_article_url=None,
+                    confidence_score=ai_issue.get("confidence_score", 50),
+                    possible_root_causes=ai_issue.get("possible_root_causes", [])
                 )
                 issues.append(iss)
                 

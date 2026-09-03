@@ -50,3 +50,21 @@ class InstrumentMemoryResponse(BaseModel):
     instrument_name: str
     total_analyses: int
     history: List[InstrumentMemoryEntrySchema]
+
+
+class AiLearningFeedbackSubmitSchema(BaseModel):
+    pattern_number: str
+    ai_recommendation: str
+    actual_action: str
+    result: bool
+    helpful_points: Optional[str] = None
+
+
+class AiLearningFeedbackResponseSchema(BaseModel):
+    id: int
+    pattern_number: str
+    ai_recommendation: str
+    actual_action: str
+    result: bool
+    helpful_points: Optional[str]
+    created_at: str

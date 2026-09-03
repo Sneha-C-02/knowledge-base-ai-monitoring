@@ -66,6 +66,9 @@ export interface Instrument {
 export interface DashboardBullet {
   text: string;
   severity: 'critical' | 'warning' | 'info' | null;
+  confidence_score?: number;
+  possible_root_causes?: string[];
+  pattern_name?: string;
 }
 
 export interface DashboardResult {
