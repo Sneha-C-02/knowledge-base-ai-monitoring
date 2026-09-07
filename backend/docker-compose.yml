@@ -1,12 +1,33 @@
 version: '3.8'
+
 services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: kb-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
   api:
     build: .
+    container_name: kb-backend
     ports:
       - "3000:3000"
     env_file:
       - .env
     volumes:
       - ./src:/app/src
+    depends_on:
+      - db
     command: uvicorn src.knowledge_base_backend.main:app --host 0.0.0.0 --port 3000 --reload
+
+volumes:
+  pgdata:
+
 

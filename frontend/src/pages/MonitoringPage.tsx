@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/common/C
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { api } from '../api/client';
-import type { Instrument, DashboardResult, InstrumentMemoryResponse } from '../types';
+import type { DashboardResult, InstrumentMemoryResponse } from '../types';
 
 export function MonitoringPage() {
   const [logFiles, setLogFiles] = useState<(File | null)[]>([null]);
@@ -14,6 +14,7 @@ export function MonitoringPage() {
   const [result, setResult] = useState<DashboardResult | null>(null);
   const [memory, setMemory] = useState<InstrumentMemoryResponse | null>(null);
   const [showMemory, setShowMemory] = useState(false);
+  const [isLoadingMemory, setIsLoadingMemory] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
   const { addActivity, addNotification, updateStats, stats } = useSystem();

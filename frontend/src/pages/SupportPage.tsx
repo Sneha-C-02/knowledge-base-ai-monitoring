@@ -144,7 +144,6 @@ export function SupportPage() {
                         <div className="pt-3 border-t border-slate-100 flex justify-end">
                           <Button 
                             variant="outline" 
-                            size="sm"
                             onClick={() => window.open(article.article_url || `/article/${article.article_number}`, '_blank')}
                           >
                             View Full Article
