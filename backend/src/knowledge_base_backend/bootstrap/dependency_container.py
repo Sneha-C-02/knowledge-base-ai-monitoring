@@ -19,6 +19,7 @@ from src.knowledge_base_backend.domain.services.log_keyword_extractor import Log
 
 from src.knowledge_base_backend.infrastructure.authentication.jwt_authentication_token_service import JwtAuthenticationTokenService
 from src.knowledge_base_backend.infrastructure.authentication.argon2_password_hashing_service import Argon2PasswordHashingService
+from src.knowledge_base_backend.domain.services.password_validator import PasswordValidator
 
 from src.knowledge_base_backend.infrastructure.artificial_intelligence.disabled_embedding_generation_service import DisabledEmbeddingGenerationService
 from src.knowledge_base_backend.infrastructure.artificial_intelligence.disabled_answer_generation_service import DisabledAnswerGenerationService
@@ -44,6 +45,7 @@ from src.knowledge_base_backend.infrastructure.events.event_bus import EventBus
 from src.knowledge_base_backend.infrastructure.system.utc_date_time_provider import UtcDateTimeProvider
 
 from src.knowledge_base_backend.application.use_cases.authenticate_user import AuthenticateUserUseCase
+from src.knowledge_base_backend.application.use_cases.register_user import RegisterUserUseCase
 from src.knowledge_base_backend.application.use_cases.list_knowledge_base_articles import ListKnowledgeBaseArticlesUseCase
 from src.knowledge_base_backend.application.use_cases.get_knowledge_base_article import GetKnowledgeBaseArticleUseCase
 from src.knowledge_base_backend.application.use_cases.submit_support_query import SubmitSupportQueryUseCase
@@ -78,6 +80,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # Core Services
     date_time_provider = providers.Singleton(UtcDateTimeProvider)
     password_hashing_service = providers.Singleton(Argon2PasswordHashingService)
+    password_validator = providers.Singleton(PasswordValidator)
     token_service = providers.Singleton(JwtAuthenticationTokenService)
     event_bus = providers.Singleton(EventBus)
     
@@ -192,6 +195,16 @@ class ApplicationContainer(containers.DeclarativeContainer):
         AuthenticateUserUseCase,
         user_repository=user_repository,
         password_hashing_service=password_hashing_service,
+        token_service=token_service,
+        activity_repository=activity_repository,
+        date_time_provider=date_time_provider
+    )
+    
+    register_user_use_case = providers.Factory(
+        RegisterUserUseCase,
+        user_repository=user_repository,
+        password_hashing_service=password_hashing_service,
+        password_validator=password_validator,
         token_service=token_service,
         activity_repository=activity_repository,
         date_time_provider=date_time_provider

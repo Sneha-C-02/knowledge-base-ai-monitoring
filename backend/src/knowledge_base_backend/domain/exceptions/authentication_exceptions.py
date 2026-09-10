@@ -6,3 +6,6 @@ class InvalidCredentialsError(AuthenticationError):
 
 class InactiveUserError(AuthenticationError):
     pass
+
+class UserAlreadyExistsError(AuthenticationError):
+    pass

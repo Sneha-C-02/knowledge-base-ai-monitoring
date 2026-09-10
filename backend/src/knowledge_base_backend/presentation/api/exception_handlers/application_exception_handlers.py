@@ -1,6 +1,6 @@
 from fastapi import Request, FastAPI
 from fastapi.responses import JSONResponse
-from src.knowledge_base_backend.domain.exceptions.authentication_exceptions import AuthenticationError
+from src.knowledge_base_backend.domain.exceptions.authentication_exceptions import AuthenticationError, UserAlreadyExistsError
 from src.knowledge_base_backend.domain.exceptions.article_exceptions import ArticleNotFoundError
 from src.knowledge_base_backend.domain.exceptions.validation_exceptions import ValidationError
 from src.knowledge_base_backend.domain.exceptions.monitoring_exceptions import MonitoringError
@@ -9,6 +9,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 def add_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(UserAlreadyExistsError)
+    async def user_already_exists_handler(request: Request, exc: UserAlreadyExistsError):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "USER_ALREADY_EXISTS",
+                    "message": str(exc) or "User already exists.",
+                    "request_identifier": getattr(request.state, "request_id", "unknown"),
+                    "details": None
+                }
+            }
+        )
+
     @app.exception_handler(AuthenticationError)
     async def auth_error_handler(request: Request, exc: AuthenticationError):
         return JSONResponse(

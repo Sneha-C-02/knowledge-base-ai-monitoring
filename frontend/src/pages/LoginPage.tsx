@@ -56,7 +56,7 @@ export function LoginPage() {
                   {error}
                 </div>
               )}
-              
+
               <div>
                 <label htmlFor="username" className="block text-sm font-medium text-slate-700 mb-1">
                   Username
@@ -96,6 +96,16 @@ export function LoginPage() {
               <Button type="submit" className="w-full" isLoading={isLoading}>
                 Sign in
               </Button>
+              <p className="text-center text-sm text-slate-600">
+                Don't have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/signup')}
+                  className="text-primary-600 hover:text-primary-700 font-medium"
+                >
+                  Sign Up
+                </button>
+              </p>
             </form>
           </CardContent>
         </Card>

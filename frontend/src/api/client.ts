@@ -14,7 +14,7 @@ class ApiClient {
 
   private async fetch<T>(endpoint: string, options?: RequestInit & { isFileUpload?: boolean }): Promise<T> {
     const headers: Record<string, string> = this.getHeaders();
-    
+
     // For FormData, the browser must set the Content-Type with the correct boundary
     if (options?.isFileUpload) {
       delete headers['Content-Type'];
@@ -58,6 +58,23 @@ class ApiClient {
     });
   }
 
+  async register(
+    username: string,
+    password: string,
+    confirm_password: string,
+    display_name?: string
+  ): Promise<{ token: string; user: User }> {
+    return this.fetch<{ token: string; user: User }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        username,
+        password,
+        confirm_password,
+        display_name,
+      }),
+    });
+  }
+
   // --- Knowledge Base ---
   async getArticles(page: number = 1, pageSize: number = 100, search?: string): Promise<PaginatedResponse<KBArticle>> {
     let url = `/kb/articles?page=${page}&page_size=${pageSize}`;
@@ -72,8 +89,8 @@ class ApiClient {
   }
 
   // --- Support ---
-  async querySupport(query: string): Promise<{ 
-    answer: string; 
+  async querySupport(query: string): Promise<{
+    answer: string;
     related_articles?: {
       article_number: string;
       title: string;
@@ -81,10 +98,10 @@ class ApiClient {
       snippet: string;
       retrieval_reason: string;
       relevance_score: number;
-    }[] 
+    }[]
   }> {
-    return this.fetch<{ 
-      answer: string; 
+    return this.fetch<{
+      answer: string;
       related_articles?: {
         article_number: string;
         title: string;
@@ -92,7 +109,7 @@ class ApiClient {
         snippet: string;
         retrieval_reason: string;
         relevance_score: number;
-      }[] 
+      }[]
     }>('/support/query', {
       method: 'POST',
       body: JSON.stringify({ query }),
