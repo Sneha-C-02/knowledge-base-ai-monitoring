@@ -1,19 +1,29 @@
-from typing import List, BinaryIO, Tuple
-from src.knowledge_base_backend.application.models.monitoring_models import MonitoringAnalysisResult, MonitoringIssueDto, MonitoringEventDto, FileInfo
-from src.knowledge_base_backend.domain.services.log_file_validator import LogFileValidator
-from src.knowledge_base_backend.domain.services.temporary_file_storage import TemporaryFileStorage
-from src.knowledge_base_backend.domain.services.log_analysis_service import LogAnalysisService
-from src.knowledge_base_backend.domain.services.log_keyword_extractor import LogKeywordExtractor
-from src.knowledge_base_backend.domain.services.embedding_generation_service import EmbeddingGenerationService
+import datetime
+import logging
+import os
+import uuid
+from typing import BinaryIO, List, Tuple
+
+from src.knowledge_base_backend.application.models.monitoring_models import (
+    FileInfo,
+    MonitoringAnalysisResult,
+    MonitoringEventDto,
+    MonitoringIssueDto,
+)
+from src.knowledge_base_backend.application.services.keyword_learning_coordinator import KeywordLearningCoordinator
+from src.knowledge_base_backend.domain.entities.monitoring_issue import MonitoringIssue
+from src.knowledge_base_backend.domain.entities.system_notification import SystemNotification
+from src.knowledge_base_backend.domain.repositories.log_event_vector_repository import (
+    LogEventVectorRecord,
+    LogEventVectorRepository,
+)
 from src.knowledge_base_backend.domain.repositories.monitoring_repository import MonitoringRepository
 from src.knowledge_base_backend.domain.repositories.notification_repository import NotificationRepository
-from src.knowledge_base_backend.domain.repositories.log_event_vector_repository import LogEventVectorRepository, LogEventVectorRecord
-from src.knowledge_base_backend.domain.entities.system_notification import SystemNotification
-from src.knowledge_base_backend.domain.entities.monitoring_issue import MonitoringIssue
-import datetime
-import uuid
-import os
-import logging
+from src.knowledge_base_backend.domain.services.embedding_generation_service import EmbeddingGenerationService
+from src.knowledge_base_backend.domain.services.log_analysis_service import LogAnalysisService
+from src.knowledge_base_backend.domain.services.log_file_validator import LogFileValidator
+from src.knowledge_base_backend.domain.services.log_keyword_extractor import LogKeywordExtractor
+from src.knowledge_base_backend.domain.services.temporary_file_storage import TemporaryFileStorage
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +39,7 @@ class AnalyzeUploadedLogsUseCase:
         keyword_extractor: LogKeywordExtractor,
         embedding_service: EmbeddingGenerationService,
         log_event_vector_repository: LogEventVectorRepository,
+        keyword_learning_coordinator: KeywordLearningCoordinator,
     ) -> None:
         self.validator = validator
         self.storage = storage
@@ -38,8 +49,11 @@ class AnalyzeUploadedLogsUseCase:
         self.keyword_extractor = keyword_extractor
         self.embedding_service = embedding_service
         self.log_event_vector_repository = log_event_vector_repository
+        self.keyword_learning_coordinator = keyword_learning_coordinator
 
-    async def execute(self, files: List[Tuple[str, BinaryIO]], instrument_id: int | None = None) -> MonitoringAnalysisResult:
+    async def execute(
+        self, files: List[Tuple[str, BinaryIO]], instrument_id: int | None = None
+    ) -> MonitoringAnalysisResult:
         if not files:
             raise ValueError("No files provided")
 
@@ -69,11 +83,17 @@ class AnalyzeUploadedLogsUseCase:
                         latest_time = mtime
 
             size_str = f"{total_size / 1024:.1f} KB" if total_size > 0 else "Unknown"
-            time_str = datetime.datetime.fromtimestamp(latest_time).strftime('%Y-%m-%d %H:%M:%S') if latest_time > 0 else "Unknown"
+            time_str = (
+                datetime.datetime.fromtimestamp(latest_time).strftime("%Y-%m-%d %H:%M:%S")
+                if latest_time > 0
+                else "Unknown"
+            )
 
             if stored_paths:
                 for path, filename in zip(stored_paths, stored_filenames):
-                    domain_issues, domain_events, run_status = await self.analysis_service.analyze_log_file_contents(path, None)
+                    domain_issues, domain_events, run_status = await self.analysis_service.analyze_log_file_contents(
+                        path, None
+                    )
                     if run_status == "CRITICAL" or (run_status == "WARNING" and status == "OK"):
                         status = run_status
 
@@ -92,27 +112,27 @@ class AnalyzeUploadedLogsUseCase:
                             message=notif_message,
                             notification_type=notif_type,
                             is_read=False,
-                            created_at=iss.event_timestamp or datetime.datetime.utcnow()
+                            created_at=iss.event_timestamp or datetime.datetime.utcnow(),
                         )
                         await self.notification_repository.save(notif)
 
-                        issues.append(MonitoringIssueDto(
-                            id=iss.issue_identifier,
-                            severity=iss.severity,
-                            timestamp=iss.event_timestamp.isoformat() if iss.event_timestamp else None,
-                            pattern=iss.pattern,
-                            description=iss.description,
-                            recommended_action=iss.recommended_action,
-                            related_article=iss.related_article_number,
-                            related_article_url=iss.related_article_url
-                        ))
+                        issues.append(
+                            MonitoringIssueDto(
+                                id=iss.issue_identifier,
+                                severity=iss.severity,
+                                timestamp=iss.event_timestamp.isoformat() if iss.event_timestamp else None,
+                                pattern=iss.pattern,
+                                description=iss.description,
+                                recommended_action=iss.recommended_action,
+                                related_article=iss.related_article_number,
+                                related_article_url=iss.related_article_url,
+                            )
+                        )
 
                     for ev in domain_events:
-                        events.append(MonitoringEventDto(
-                            timestamp=ev.timestamp.isoformat(),
-                            level=ev.level,
-                            message=ev.message
-                        ))
+                        events.append(
+                            MonitoringEventDto(timestamp=ev.timestamp.isoformat(), level=ev.level, message=ev.message)
+                        )
 
                     # --- NEW: Keyword extraction & vectorization ---
                     await self._vectorize_log_keywords(path, filename, instrument_id)
@@ -126,7 +146,7 @@ class AnalyzeUploadedLogsUseCase:
             file_status="ACCESSIBLE",
             file_info=FileInfo(size=size_str, last_modified=time_str),
             issues=issues,
-            recent_events=events
+            recent_events=events,
         )
 
     async def _vectorize_log_keywords(
@@ -150,20 +170,24 @@ class AnalyzeUploadedLogsUseCase:
                 logger.info(f"No critical keywords found in '{filename}' — skipping vectorization.")
                 return
 
+            await self.keyword_learning_coordinator.learn_from_events(keyword_events, instrument_id or 0)
+
             records: List[LogEventVectorRecord] = []
             for event in keyword_events:
                 try:
                     embedding = await self.embedding_service.generate_text_embedding(event.cleaned_text)
-                    records.append(LogEventVectorRecord(
-                        instrument_id=instrument_id or 0,
-                        log_filename=filename,
-                        severity=event.severity,
-                        component=event.component,
-                        cleaned_text=event.cleaned_text,
-                        raw_log_line=event.raw_line,
-                        matched_patterns=event.matched_patterns,
-                        event_embedding=embedding,
-                    ))
+                    records.append(
+                        LogEventVectorRecord(
+                            instrument_id=instrument_id or 0,
+                            log_filename=filename,
+                            severity=event.severity,
+                            component=event.component,
+                            cleaned_text=event.cleaned_text,
+                            raw_log_line=event.raw_line,
+                            matched_patterns=event.matched_patterns,
+                            event_embedding=embedding,
+                        )
+                    )
                 except Exception as embed_err:
                     logger.warning(f"Failed to embed log event: {embed_err}")
 

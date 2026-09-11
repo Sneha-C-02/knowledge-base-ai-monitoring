@@ -11,6 +11,7 @@ import { LoginPage } from './pages/LoginPage';
 import { ArticlePage } from './pages/ArticlePage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SystemProvider } from './context/SystemContext';
+import { MonitoringProvider } from './context/MonitoringContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -24,6 +25,7 @@ function App() {
   return (
     <AuthProvider>
       <SystemProvider>
+        <MonitoringProvider>
         <Router>
           <Routes>
           <Route path="/" element={<LandingPage />} />
@@ -45,7 +47,8 @@ function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </Router>
+        </Router>
+        </MonitoringProvider>
       </SystemProvider>
     </AuthProvider>
   )

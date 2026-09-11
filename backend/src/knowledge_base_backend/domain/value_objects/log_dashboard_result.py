@@ -6,6 +6,20 @@ from typing import List, Optional
 class DashboardSummaryBullet:
     text: str
     severity: Optional[str] = None
+    confidence_score: Optional[int] = None
+    possible_root_causes: Optional[List[str]] = None
+    pattern_name: Optional[str] = None
+
+
+@dataclass
+class DashboardFinding:
+    """An individual issue visible in a complete log analysis."""
+    filename: str
+    line_number: int
+    snippet: str
+    severity: str
+    explanation: str
+    detected_by: str = "rule"
 
 
 @dataclass
@@ -28,3 +42,5 @@ class LogDashboardResult:
     original_line_count: Optional[int] = None
     analyzed_line_count: Optional[int] = None
     was_log_reduced: bool = False
+    coverage_mode: str = "exhaustive"
+    complete_findings: List[DashboardFinding] = field(default_factory=list)

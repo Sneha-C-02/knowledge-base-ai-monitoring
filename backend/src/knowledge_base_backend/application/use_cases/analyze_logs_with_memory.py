@@ -1,22 +1,32 @@
-from typing import List, BinaryIO, Tuple
 import datetime
 import json
+import logging
 import re
+import uuid
+from typing import BinaryIO, List, Tuple
+
 import aiofiles
 
-from src.knowledge_base_backend.domain.services.log_file_validator import LogFileValidator
-from src.knowledge_base_backend.domain.services.persistent_file_storage import PersistentFileStorage
-from src.knowledge_base_backend.domain.repositories.instrument_memory_repository import InstrumentMemoryRepository
-from src.knowledge_base_backend.domain.repositories.instrument_repository import InstrumentRepository
-from src.knowledge_base_backend.domain.repositories.notification_repository import NotificationRepository
-from src.knowledge_base_backend.domain.repositories.monitored_log_file_repository import MonitoredLogFileRepository
+from src.knowledge_base_backend.application.services.keyword_learning_coordinator import KeywordLearningCoordinator
 from src.knowledge_base_backend.domain.entities.instrument_memory_entry import InstrumentMemoryEntry
 from src.knowledge_base_backend.domain.entities.monitored_log_file import MonitoredLogFile
 from src.knowledge_base_backend.domain.entities.system_notification import SystemNotification
-from src.knowledge_base_backend.domain.value_objects.log_dashboard_result import LogDashboardResult, DashboardSummaryBullet
-from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_dashboard_analysis_service import GroqDashboardAnalysisService
+from src.knowledge_base_backend.domain.repositories.instrument_memory_repository import InstrumentMemoryRepository
+from src.knowledge_base_backend.domain.repositories.instrument_repository import InstrumentRepository
+from src.knowledge_base_backend.domain.repositories.monitored_log_file_repository import MonitoredLogFileRepository
+from src.knowledge_base_backend.domain.repositories.notification_repository import NotificationRepository
 from src.knowledge_base_backend.domain.services.date_time_provider import DateTimeProvider
-import uuid
+from src.knowledge_base_backend.domain.services.log_file_validator import LogFileValidator
+from src.knowledge_base_backend.domain.services.persistent_file_storage import PersistentFileStorage
+from src.knowledge_base_backend.domain.value_objects.log_dashboard_result import (
+    DashboardSummaryBullet,
+    LogDashboardResult,
+)
+from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_dashboard_analysis_service import (
+    GroqDashboardAnalysisService,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyzeLogsWithMemoryUseCase:
@@ -50,7 +60,8 @@ class AnalyzeLogsWithMemoryUseCase:
         instrument_repository: InstrumentRepository,
         notification_repository: NotificationRepository,
         monitored_file_repository: MonitoredLogFileRepository,
-        date_time_provider: DateTimeProvider
+        date_time_provider: DateTimeProvider,
+        keyword_learning_coordinator: KeywordLearningCoordinator,
     ) -> None:
         self.validator = validator
         self.storage = storage
@@ -60,21 +71,22 @@ class AnalyzeLogsWithMemoryUseCase:
         self.notification_repository = notification_repository
         self.monitored_file_repository = monitored_file_repository
         self.date_time_provider = date_time_provider
+        self.keyword_learning_coordinator = keyword_learning_coordinator
 
     async def _extract_instrument_name(self, stream: BinaryIO) -> str:
         pos = stream.tell()
         stream.seek(0)
-        
+
         # Read the first few lines to find the instrument tag
         lines = []
         for _ in range(10):
             line = stream.readline()
             if not line:
                 break
-            lines.append(line.decode('utf-8', errors='ignore'))
-            
+            lines.append(line.decode("utf-8", errors="ignore"))
+
         stream.seek(pos)  # Reset stream position
-        
+
         # Look for the first bracketed text after the timestamp colon
         # Example: "Mon Oct 20 11:32:42 AM GMT Summer Time: [EPC]"
         for line in lines:
@@ -83,13 +95,10 @@ class AnalyzeLogsWithMemoryUseCase:
                 name = match.group(1).strip()
                 if name:
                     return name
-                    
+
         return "Unknown Instrument"
 
-    async def execute(
-        self,
-        files: List[Tuple[str, BinaryIO]]
-    ) -> LogDashboardResult:
+    async def execute(self, files: List[Tuple[str, BinaryIO]], analysis_mode: str = "exhaustive") -> LogDashboardResult:
         if not files:
             raise ValueError("No files provided for analysis")
 
@@ -99,12 +108,12 @@ class AnalyzeLogsWithMemoryUseCase:
         # --- Step 1: Detect instrument from the first file ---
         first_filename, first_stream = files[0]
         instrument_name = await self._extract_instrument_name(first_stream)
-        
+
         instrument = await self.instrument_repository.get_by_name(instrument_name)
         if instrument is None:
             # Create the instrument dynamically if it doesn't exist
             instrument = await self.instrument_repository.create(instrument_name)
-            
+
         instrument_id = instrument.id
 
         # --- Step 2: Store uploaded files temporarily ---
@@ -129,7 +138,7 @@ class AnalyzeLogsWithMemoryUseCase:
             healthy_apps=0,
             daily_summary_bullets=[],
             overall_status="OK",
-            files_analyzed=0
+            files_analyzed=0,
         )
 
         for path, filename in zip(stored_paths, filenames):
@@ -138,7 +147,8 @@ class AnalyzeLogsWithMemoryUseCase:
                 filename=filename,
                 instrument_id=instrument_id,
                 instrument_name=instrument.name,
-                memory_entries=memory_entries
+                memory_entries=memory_entries,
+                analysis_mode=analysis_mode,
             )
 
             # Aggregate results across multiple files
@@ -147,43 +157,55 @@ class AnalyzeLogsWithMemoryUseCase:
             aggregated_result.errors += result.errors
             aggregated_result.healthy_apps = max(aggregated_result.healthy_apps, result.healthy_apps)
             aggregated_result.daily_summary_bullets.extend(result.daily_summary_bullets)
+            aggregated_result.complete_findings.extend(result.complete_findings)
             aggregated_result.files_analyzed += 1
-            
+
             # Aggregate analysis status and chunks
-            if not hasattr(aggregated_result, 'total_chunks'):
+            if not hasattr(aggregated_result, "total_chunks"):
                 aggregated_result.total_chunks = 0
                 aggregated_result.successful_ai_chunks = 0
                 aggregated_result.fallback_chunks = 0
                 aggregated_result.failed_chunks = 0
-            
+
             # If aggregated_result was just initialized, its total_chunks is 1 by default, let's reset it on first real file
             if aggregated_result.files_analyzed == 1:
                 aggregated_result.total_chunks = result.total_chunks
                 aggregated_result.successful_ai_chunks = result.successful_ai_chunks
-                aggregated_result.fallback_chunks = getattr(result, 'fallback_chunks', 0)
-                aggregated_result.failed_chunks = getattr(result, 'failed_chunks', 0)
+                aggregated_result.fallback_chunks = getattr(result, "fallback_chunks", 0)
+                aggregated_result.failed_chunks = getattr(result, "failed_chunks", 0)
                 aggregated_result.analysis_status = result.analysis_status
                 aggregated_result.original_line_count = result.original_line_count
                 aggregated_result.analyzed_line_count = result.analyzed_line_count
                 aggregated_result.was_log_reduced = result.was_log_reduced
+                aggregated_result.coverage_mode = result.coverage_mode
             else:
-                aggregated_result.total_chunks += getattr(result, 'total_chunks', 1)
-                aggregated_result.successful_ai_chunks += getattr(result, 'successful_ai_chunks', 1)
-                aggregated_result.fallback_chunks += getattr(result, 'fallback_chunks', 0)
-                aggregated_result.failed_chunks += getattr(result, 'failed_chunks', 0)
+                aggregated_result.total_chunks += getattr(result, "total_chunks", 1)
+                aggregated_result.successful_ai_chunks += getattr(result, "successful_ai_chunks", 1)
+                aggregated_result.fallback_chunks += getattr(result, "fallback_chunks", 0)
+                aggregated_result.failed_chunks += getattr(result, "failed_chunks", 0)
                 if result.original_line_count:
-                    aggregated_result.original_line_count = (aggregated_result.original_line_count or 0) + result.original_line_count
+                    aggregated_result.original_line_count = (
+                        aggregated_result.original_line_count or 0
+                    ) + result.original_line_count
                 if result.analyzed_line_count:
-                    aggregated_result.analyzed_line_count = (aggregated_result.analyzed_line_count or 0) + result.analyzed_line_count
+                    aggregated_result.analyzed_line_count = (
+                        aggregated_result.analyzed_line_count or 0
+                    ) + result.analyzed_line_count
                 if result.was_log_reduced:
                     aggregated_result.was_log_reduced = True
-                
+
                 # Downgrade status if any file had a partial or failed status
                 if result.analysis_status == "AI_ANALYSIS_FAILED":
                     aggregated_result.analysis_status = "AI_ANALYSIS_FAILED"
-                elif result.analysis_status == "DETERMINISTIC_FALLBACK" and aggregated_result.analysis_status != "AI_ANALYSIS_FAILED":
+                elif (
+                    result.analysis_status == "DETERMINISTIC_FALLBACK"
+                    and aggregated_result.analysis_status != "AI_ANALYSIS_FAILED"
+                ):
                     aggregated_result.analysis_status = "DETERMINISTIC_FALLBACK"
-                elif result.analysis_status == "PARTIAL_AI_ANALYSIS" and aggregated_result.analysis_status not in ["AI_ANALYSIS_FAILED", "DETERMINISTIC_FALLBACK"]:
+                elif result.analysis_status == "PARTIAL_AI_ANALYSIS" and aggregated_result.analysis_status not in [
+                    "AI_ANALYSIS_FAILED",
+                    "DETERMINISTIC_FALLBACK",
+                ]:
                     aggregated_result.analysis_status = "PARTIAL_AI_ANALYSIS"
 
             if result.overall_status == "CRITICAL":
@@ -202,7 +224,8 @@ class AnalyzeLogsWithMemoryUseCase:
         filename: str,
         instrument_id: int,
         instrument_name: str,
-        memory_entries: list
+        memory_entries: list,
+        analysis_mode: str,
     ) -> LogDashboardResult:
         """
         Process a single log file. Determines whether this is an initial mapping
@@ -211,16 +234,18 @@ class AnalyzeLogsWithMemoryUseCase:
         current_time = self.date_time_provider.get_current_utc_time()
 
         # Read the FULL file content
-        async with aiofiles.open(path, 'r', encoding='utf-8', errors='replace') as f:
+        async with aiofiles.open(path, "r", encoding="utf-8", errors="replace") as f:
             full_content = await f.read()
 
         all_lines = full_content.split("\n")
         total_lines = len(all_lines)
 
+        # Learn error-related keywords from this file's critical/warning lines,
+        # so future keyword searches can suggest terms grounded in real errors.
+        await self.keyword_learning_coordinator.learn_from_text(full_content, instrument_id)
+
         # Check if this file has been monitored before
-        monitored = await self.monitored_file_repository.find_by_instrument_and_filename(
-            instrument_id, filename
-        )
+        monitored = await self.monitored_file_repository.find_by_instrument_and_filename(instrument_id, filename)
 
         if monitored is None:
             # ============================================
@@ -231,7 +256,8 @@ class AnalyzeLogsWithMemoryUseCase:
                 log_filename=filename,
                 instrument_id=instrument_id,
                 instrument_name=instrument_name,
-                memory_entries=memory_entries
+                memory_entries=memory_entries,
+                analysis_mode=analysis_mode,
             )
 
             # Generate a context summary for storage
@@ -240,7 +266,7 @@ class AnalyzeLogsWithMemoryUseCase:
                 existing_summary=None,
                 log_filename=filename,
                 instrument_name=instrument_name,
-                instrument_id=instrument_id
+                instrument_id=instrument_id,
             )
 
             # Save the MonitoredLogFile record
@@ -251,7 +277,7 @@ class AnalyzeLogsWithMemoryUseCase:
                 total_lines_analyzed=total_lines,
                 full_context_summary=context_summary,
                 created_at=current_time,
-                updated_at=current_time
+                updated_at=current_time,
             )
             await self.monitored_file_repository.save(monitored)
 
@@ -261,27 +287,29 @@ class AnalyzeLogsWithMemoryUseCase:
             # ============================================
             previously_analyzed = monitored.total_lines_analyzed
 
-            if total_lines <= previously_analyzed:
-                # No new lines — return a clean status based on stored context
-                result = LogDashboardResult(
+            if total_lines <= previously_analyzed or analysis_mode == "exhaustive":
+                # Exhaustive mode always revisits the complete file. A fast sampled re-upload
+                # without new lines also receives a fresh result rather than silent zeros.
+                result = await self.ai_service.analyze_full_log_with_memory(
+                    log_content=full_content,
+                    log_filename=filename,
                     instrument_id=instrument_id,
                     instrument_name=instrument_name,
-                    critical_incidents=0,
-                    warnings=0,
-                    errors=0,
-                    healthy_apps=0,
-                    daily_summary_bullets=[
-                        DashboardSummaryBullet(
-                            text=f"No new content since last analysis ({previously_analyzed} lines analyzed)",
-                            severity="info"
-                        )
-                    ],
-                    overall_status="OK",
-                    files_analyzed=1,
-                    original_line_count=total_lines,
-                    analyzed_line_count=total_lines,
-                    was_log_reduced=False
+                    memory_entries=memory_entries,
+                    analysis_mode=analysis_mode,
                 )
+                # Update the context summary to stay current
+                context_summary = await self.ai_service.generate_context_summary(
+                    log_content=full_content,
+                    existing_summary=monitored.full_context_summary,
+                    log_filename=filename,
+                    instrument_name=instrument_name,
+                    instrument_id=instrument_id,
+                )
+                monitored.full_context_summary = context_summary
+                monitored.total_lines_analyzed = total_lines
+                monitored.updated_at = current_time
+                await self.monitored_file_repository.update(monitored)
             else:
                 # Extract only the NEW lines
                 new_lines = all_lines[previously_analyzed:]
@@ -293,7 +321,8 @@ class AnalyzeLogsWithMemoryUseCase:
                     log_filename=filename,
                     instrument_id=instrument_id,
                     instrument_name=instrument_name,
-                    memory_entries=memory_entries
+                    memory_entries=memory_entries,
+                    analysis_mode=analysis_mode,
                 )
 
                 # Update the context summary to include new content
@@ -302,7 +331,7 @@ class AnalyzeLogsWithMemoryUseCase:
                     existing_summary=monitored.full_context_summary,
                     log_filename=filename,
                     instrument_name=instrument_name,
-                    instrument_id=instrument_id
+                    instrument_id=instrument_id,
                 )
 
                 # Update the MonitoredLogFile record
@@ -324,10 +353,9 @@ class AnalyzeLogsWithMemoryUseCase:
             errors=result.errors,
             healthy_apps=result.healthy_apps,
             ai_summary=summary_text,
-            raw_issues_json=json.dumps([
-                {"text": b.text, "severity": b.severity}
-                for b in result.daily_summary_bullets
-            ])
+            raw_issues_json=json.dumps(
+                [{"text": b.text, "severity": b.severity} for b in result.daily_summary_bullets]
+            ),
         )
         await self.memory_repository.save_memory_entry(memory_entry)
 
@@ -346,8 +374,10 @@ class AnalyzeLogsWithMemoryUseCase:
             f"AI Generated Daily Summary:\n{bullet_text}"
         )
 
-        notif_type = "error" if result.overall_status == "CRITICAL" else (
-            "warning" if result.overall_status == "WARNING" else "info"
+        notif_type = (
+            "error"
+            if result.overall_status == "CRITICAL"
+            else ("warning" if result.overall_status == "WARNING" else "info")
         )
 
         notification = SystemNotification(
@@ -357,6 +387,6 @@ class AnalyzeLogsWithMemoryUseCase:
             message=message,
             notification_type=notif_type,
             is_read=False,
-            created_at=datetime.datetime.utcnow()
+            created_at=datetime.datetime.utcnow(),
         )
         await self.notification_repository.save(notification)

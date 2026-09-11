@@ -5,11 +5,17 @@ import { Loader2 } from 'lucide-react';
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
   variant?: 'primary' | 'secondary' | 'outline' | 'danger';
+  size?: 'sm' | 'md' | 'lg';
   isLoading?: boolean;
 }
 
-export function Button({ children, variant = 'primary', isLoading, className, disabled, ...props }: ButtonProps) {
-  const base = "inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2";
+export function Button({ children, variant = 'primary', size = 'md', isLoading, className, disabled, ...props }: ButtonProps) {
+  const base = "inline-flex items-center justify-center font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2";
+  const sizeStyles = {
+    sm: "px-2.5 py-1.5 text-xs",
+    md: "px-4 py-2 text-sm",
+    lg: "px-6 py-3 text-base",
+  };
   const variants = {
     primary: "bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500",
     secondary: "bg-slate-100 text-slate-700 hover:bg-slate-200 focus:ring-slate-500",
@@ -19,7 +25,7 @@ export function Button({ children, variant = 'primary', isLoading, className, di
 
   return (
     <button
-      className={clsx(base, variants[variant], (disabled || isLoading) && "opacity-50 cursor-not-allowed", className)}
+      className={clsx(base, sizeStyles[size], variants[variant], (disabled || isLoading) && "opacity-50 cursor-not-allowed", className)}
       disabled={disabled || isLoading}
       {...props}
     >

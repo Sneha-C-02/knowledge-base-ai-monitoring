@@ -7,7 +7,7 @@ import random
 from collections import deque
 from typing import List, Optional
 from src.knowledge_base_backend.domain.value_objects.log_dashboard_result import (
-    LogDashboardResult, DashboardSummaryBullet
+    LogDashboardResult, DashboardSummaryBullet, DashboardFinding
 )
 from src.knowledge_base_backend.domain.entities.instrument_memory_entry import InstrumentMemoryEntry
 from src.knowledge_base_backend.domain.services.log_chunker_service import LogChunkerService
@@ -203,6 +203,118 @@ class GroqDashboardAnalysisService:
                 self._refund_tokens(estimated_tokens)
                 raise e
 
+    async def classify_keyword_findings(self, findings: List[dict]) -> List[dict]:
+        """Classify explicit keyword matches by analyzing surrounding lines, identifying error type, problem summary, and KB search query."""
+        if not findings:
+            return []
+
+        classifications: List[dict] = []
+        fallback_pattern = re.compile(
+            r"\b(error|fail(?:ed|ure|ing)?|fatal|critical|exception|timeout|disconnect(?:ed|ion)?)\b",
+            re.IGNORECASE,
+        )
+
+        for start in range(0, len(findings), 15):
+            batch = findings[start:start + 15]
+            payload = [
+                {
+                    "index": index,
+                    "keyword": item["keyword"],
+                    "matched_text": item["matched_text"],
+                    "context": item["context"],
+                }
+                for index, item in enumerate(batch)
+            ]
+            system_prompt = (
+                "You are an expert diagnostic log analysis assistant for Waters analytical and laboratory instruments. "
+                "You analyze keyword occurrences using their supplied surrounding context lines.\n"
+                "For every item:\n"
+                "1. Decide whether it represents an actual error or failure (is_error: true), or benign/normal operational text (is_error: false).\n"
+                "2. State clearly WHAT THE ERROR IS (error_type, e.g. 'Low Mass Resolution Setting Write Failure', 'RioStatus Negative Error Code', 'Pump Pressure Transducer Timeout', 'Autosampler Missing Vial'). If not an error, use 'Informational / Benign Operation'.\n"
+                "3. Summarize the problem concisely in 1-2 clear technical sentences explaining what happened based on the surrounding lines (problem_summary).\n"
+                "4. Provide a focused search_query to locate the matching Knowledge Base article (e.g. 'EngineerServer Low Mass Resolution Setting failed write RioStatus').\n"
+                "5. Provide practical next troubleshooting steps (recommended_action).\n"
+                "6. Provide diagnostic rationale citing evidence from the surrounding lines (rationale).\n"
+                "7. Provide a confidence_score between 0 and 100.\n"
+                "Respond ONLY with valid JSON in this structure:\n"
+                '{"matches":[{"index":0,"is_error":true,"error_type":"...","problem_summary":"...","search_query":"...","recommended_action":"...","rationale":"...","confidence_score":95}]}'
+            )
+            user_prompt = "EXPLICIT KEYWORD MATCHES WITH SURROUNDING CONTEXT:\n" + json.dumps(payload)
+            try:
+                response = await self._call_groq(
+                    system_prompt, user_prompt, int((len(system_prompt) + len(user_prompt)) * 0.25) + 300
+                )
+                parsed = robust_parse_json(response)
+                by_index = {item.get("index"): item for item in parsed.get("matches", []) if isinstance(item, dict)}
+                for index, item in enumerate(batch):
+                    answer = by_index.get(index, {})
+                    is_err = bool(answer.get("is_error", False))
+                    err_type = str(answer.get("error_type") or ("Detected Error / Failure" if is_err else "Informational / Benign Operation"))
+                    prob_summary = str(answer.get("problem_summary") or answer.get("rationale") or ("An error was identified in the surrounding lines." if is_err else "Normal operational text."))
+                    s_query = str(answer.get("search_query") or f"{item['keyword']} {item['matched_text']}")
+                    rec_action = str(answer.get("recommended_action")) if answer.get("recommended_action") else None
+                    classifications.append({
+                        "is_error": is_err,
+                        "error_type": err_type,
+                        "problem_summary": prob_summary,
+                        "search_query": s_query,
+                        "recommended_action": rec_action,
+                        "rationale": str(answer.get("rationale") or "AI classification analyzed the surrounding lines."),
+                        "confidence_score": max(0, min(100, int(answer.get("confidence_score", 85 if is_err else 70)))),
+                        "classification_source": "ai",
+                    })
+            except Exception:
+                for item in batch:
+                    lines = item.get("context", [])
+                    text = "\n".join(lines)
+                    matched_text = item.get("matched_text", "")
+                    keyword = item.get("keyword", "")
+
+                    target_line = ""
+                    for line in lines:
+                        if matched_text.lower() in line.lower() or keyword.lower() in line.lower():
+                            target_line = line
+                            break
+                    if not target_line and lines:
+                        target_line = lines[len(lines) // 2]
+
+                    is_err = bool(fallback_pattern.search(text))
+                    comp_match = re.search(r'(\[(?:EPC|System|Pump|Autosampler|Detector|MS)\]|\([A-Za-z0-9_]+\):)', target_line or text)
+                    comp = comp_match.group(0).strip("[](): ") if comp_match else ""
+
+                    if is_err:
+                        cleaned_line = re.sub(r'^(?:[A-Za-z]{3}\s+[A-Za-z]{3}\s+\d+\s+[\d:]+(?:\s+[A-Z]+)?(?:\s+[A-Za-z\s]+)?:\s*)?', '', target_line).strip()
+                        if comp and cleaned_line:
+                            err_type = f"{comp}: {cleaned_line[:65]}"
+                        elif cleaned_line:
+                            err_type = cleaned_line[:75]
+                        else:
+                            err_type = f"{keyword.capitalize()} Error"
+                        prob_summary = f"The log indicates a failure around line {item.get('line_number', '')}: '{cleaned_line or matched_text}'. Surrounding context reports an operational error."
+                        s_query = f"{comp} {keyword} {cleaned_line[:40]}".strip()
+                        rec_action = f"Check {comp or 'subsystem'} operational state and verify hardware registers/connections."
+                        rationale = "Deterministic fallback: error-level wording was detected in the local context lines."
+                        confidence = 75
+                    else:
+                        err_type = "Informational / Benign Operation"
+                        prob_summary = f"Keyword '{keyword}' appears in standard configuration or normal status context."
+                        s_query = f"{comp} {keyword}".strip()
+                        rec_action = None
+                        rationale = "Deterministic fallback: no error-level wording was found in the local context."
+                        confidence = 65
+
+                    classifications.append({
+                        "is_error": is_err,
+                        "error_type": err_type,
+                        "problem_summary": prob_summary,
+                        "search_query": s_query,
+                        "recommended_action": rec_action,
+                        "rationale": rationale,
+                        "confidence_score": confidence,
+                        "classification_source": "deterministic_fallback",
+                    })
+        return classifications
+
     def _parse_dashboard_result(
         self, content: str, instrument_id: int, instrument_name: str
     ) -> LogDashboardResult:
@@ -265,6 +377,46 @@ class GroqDashboardAnalysisService:
             was_log_reduced=was_log_reduced
         )
 
+    def _select_for_analysis(self, log_content: str, analysis_mode: str) -> SelectedLogContent:
+        """Exhaustive mode deliberately keeps every line; fast mode retains focused sampling."""
+        if analysis_mode == "exhaustive":
+            line_count = len(log_content.split("\n")) if log_content else 0
+            return SelectedLogContent(
+                content=log_content,
+                original_line_count=line_count,
+                analyzed_line_count=line_count,
+                was_reduced=False,
+            )
+        return self.log_selection_service.select_log_content(log_content)
+
+    def _attach_complete_findings(
+        self, result: LogDashboardResult, content: str, filename: str, analysis_mode: str
+    ) -> LogDashboardResult:
+        """Expose every deterministic error-level line that was visible to this analysis mode."""
+        severe = re.compile(r"\b(fatal|critical|panic)\b", re.IGNORECASE)
+        warning = re.compile(r"\b(warn|warning)\b", re.IGNORECASE)
+        error = re.compile(
+            r"\b(error|exception|fail(?:ed|ure|ing)?|timeout|disconnect(?:ed|ion)?|lost)\b",
+            re.IGNORECASE,
+        )
+        findings = []
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            severity = "critical" if severe.search(line) else ("error" if error.search(line) else None)
+            if not severity and warning.search(line):
+                severity = "warning"
+            if severity:
+                findings.append(DashboardFinding(
+                    filename=filename,
+                    line_number=line_number,
+                    snippet=line[:1000],
+                    severity=severity,
+                    explanation="Detected severity wording in the analyzed log line.",
+                    detected_by="rule",
+                ))
+        result.complete_findings = findings
+        result.coverage_mode = analysis_mode
+        return result
+
     async def analyze_log_chunk(
         self,
         chunk_content: str,
@@ -273,16 +425,23 @@ class GroqDashboardAnalysisService:
         instrument_name: str
     ) -> dict:
         system_prompt = (
-            "You are an AI analyzing a specific chunk of a large log file. "
-            "Extract critical errors, warnings, and notable events from this segment.\n\n"
+            "You are an expert AI diagnostic engineer for Waters laboratory instruments (e.g. mass spectrometers). "
+            "Analyze this log chunk for ALL anomalies, errors, and failures.\n\n"
+            "CRITICAL: Flag ALL of the following as errors/incidents:\n"
+            "- Any line containing 'RioStatus => -1' (hardware communication failure)\n"
+            "- EngineerServer 'failed to write' any value\n"
+            "- SetRioValue returning an error code\n"
+            "- Resolution, voltage, or pressure settings that failed to apply\n"
+            "- Any line with 'error', 'fail', 'FATAL', 'exception', 'timeout', 'lost', 'disconnect'\n"
+            "- Repeated failed operations on the same setting (pattern of failure)\n\n"
             "Respond with ONLY a raw JSON object (no markdown, no explanation) with these keys:\n"
             "{\n"
             '  "chunk_id": <integer>,\n'
             '  "critical_incidents": <integer count of CRITICAL issues>,\n'
             '  "warnings": <integer count of WARNINGs>,\n'
-            '  "errors": <integer count of ERRORs>,\n'
-            '  "patterns": ["string array of recurring issues or stack traces"],\n'
-            '  "important_events": ["string array of other notable events"]\n'
+            '  "errors": <integer count of ERRORs — include RioStatus -1, write failures etc>,\n'
+            '  "patterns": ["string array of recurring issues, e.g. RioStatus=-1 on LOW_MASS_RESOLUTION_MS1"],\n'
+            '  "important_events": ["string array of other notable events with timestamps if available"]\n'
             "}\n"
         )
 
@@ -329,6 +488,36 @@ class GroqDashboardAnalysisService:
         instrument_name: str,
         memory_entries: List[InstrumentMemoryEntry]
     ) -> LogDashboardResult:
+        # Exhaustive runs can contain thousands of chunks. Fold them in bounded batches
+        # before the final synthesis so no log section is discarded or overflows context.
+        if len(chunk_results) > self.max_ai_chunks:
+            folded_results = []
+            for offset in range(0, len(chunk_results), self.max_ai_chunks):
+                batch_result = await self.synthesize_chunk_findings(
+                    chunk_results=chunk_results[offset:offset + self.max_ai_chunks],
+                    stored_context_summary=stored_context_summary,
+                    log_filename=log_filename,
+                    instrument_id=instrument_id,
+                    instrument_name=instrument_name,
+                    memory_entries=memory_entries,
+                )
+                folded_results.append({
+                    "critical_incidents": batch_result.critical_incidents,
+                    "warnings": batch_result.warnings,
+                    "errors": batch_result.errors,
+                    "patterns": [bullet.text for bullet in batch_result.daily_summary_bullets],
+                    "important_events": [],
+                    "is_fallback": batch_result.analysis_status != "FULL_AI_ANALYSIS",
+                })
+            return await self.synthesize_chunk_findings(
+                chunk_results=folded_results,
+                stored_context_summary=stored_context_summary,
+                log_filename=log_filename,
+                instrument_id=instrument_id,
+                instrument_name=instrument_name,
+                memory_entries=memory_entries,
+            )
+
         memory_context = self._build_memory_context(memory_entries)
         
         feedback_context = ""
@@ -414,9 +603,10 @@ class GroqDashboardAnalysisService:
         log_filename: str,
         instrument_id: int,
         instrument_name: str,
-        memory_entries: List[InstrumentMemoryEntry]
+        memory_entries: List[InstrumentMemoryEntry],
+        analysis_mode: str = "exhaustive"
     ) -> LogDashboardResult:
-        selected = self.log_selection_service.select_log_content(log_content)
+        selected = self._select_for_analysis(log_content, analysis_mode)
         content_to_analyze = selected.content
 
         input_chars = len(content_to_analyze)
@@ -427,7 +617,7 @@ class GroqDashboardAnalysisService:
             target_tokens = min(1500, max(800, estimated_tokens // self.max_ai_chunks + 1))
             chunks = chunker.chunk_log(content_to_analyze, target_tokens)
             
-            if len(chunks) > self.max_ai_chunks:
+            if analysis_mode == "fast" and len(chunks) > self.max_ai_chunks:
                 chunks = chunks[:self.max_ai_chunks]
             
             # Analyze chunks sequentially to guarantee accurate rate limit tracking without race conditions
@@ -473,7 +663,7 @@ class GroqDashboardAnalysisService:
             result.original_line_count = selected.original_line_count
             result.analyzed_line_count = selected.analyzed_line_count
             result.was_log_reduced = selected.was_reduced
-            return result
+            return self._attach_complete_findings(result, content_to_analyze, log_filename, analysis_mode)
 
         memory_context = self._build_memory_context(memory_entries)
 
@@ -521,7 +711,7 @@ class GroqDashboardAnalysisService:
             result.original_line_count = selected.original_line_count
             result.analyzed_line_count = selected.analyzed_line_count
             result.was_log_reduced = selected.was_reduced
-            return result
+            return self._attach_complete_findings(result, content_to_analyze, log_filename, analysis_mode)
         except Exception as e:
             res = self._fallback_result(content_to_analyze, instrument_id, instrument_name, e)
             res.analysis_status = "AI_ANALYSIS_FAILED"
@@ -532,7 +722,7 @@ class GroqDashboardAnalysisService:
             res.original_line_count = selected.original_line_count
             res.analyzed_line_count = selected.analyzed_line_count
             res.was_log_reduced = selected.was_reduced
-            return res
+            return self._attach_complete_findings(res, content_to_analyze, log_filename, analysis_mode)
 
     async def analyze_incremental_log(
         self,
@@ -541,9 +731,10 @@ class GroqDashboardAnalysisService:
         log_filename: str,
         instrument_id: int,
         instrument_name: str,
-        memory_entries: List[InstrumentMemoryEntry]
+        memory_entries: List[InstrumentMemoryEntry],
+        analysis_mode: str = "exhaustive"
     ) -> LogDashboardResult:
-        selected = self.log_selection_service.select_log_content(new_lines_content)
+        selected = self._select_for_analysis(new_lines_content, analysis_mode)
         content_to_analyze = selected.content
 
         input_chars = len(content_to_analyze)
@@ -554,7 +745,7 @@ class GroqDashboardAnalysisService:
             target_tokens = min(1500, max(800, estimated_tokens // self.max_ai_chunks + 1))
             chunks = chunker.chunk_log(content_to_analyze, target_tokens)
             
-            if len(chunks) > self.max_ai_chunks:
+            if analysis_mode == "fast" and len(chunks) > self.max_ai_chunks:
                 chunks = chunks[:self.max_ai_chunks]
             
             # Analyze chunks sequentially to guarantee accurate rate limit tracking without race conditions
@@ -600,7 +791,7 @@ class GroqDashboardAnalysisService:
             result.original_line_count = selected.original_line_count
             result.analyzed_line_count = selected.analyzed_line_count
             result.was_log_reduced = selected.was_reduced
-            return result
+            return self._attach_complete_findings(result, content_to_analyze, log_filename, analysis_mode)
 
         memory_context = self._build_memory_context(memory_entries)
 
@@ -649,7 +840,7 @@ class GroqDashboardAnalysisService:
             result.original_line_count = selected.original_line_count
             result.analyzed_line_count = selected.analyzed_line_count
             result.was_log_reduced = selected.was_reduced
-            return result
+            return self._attach_complete_findings(result, content_to_analyze, log_filename, analysis_mode)
         except Exception as e:
             res = self._fallback_result(content_to_analyze, instrument_id, instrument_name, e)
             res.analysis_status = "AI_ANALYSIS_FAILED"
@@ -660,7 +851,7 @@ class GroqDashboardAnalysisService:
             res.original_line_count = selected.original_line_count
             res.analyzed_line_count = selected.analyzed_line_count
             res.was_log_reduced = selected.was_reduced
-            return res
+            return self._attach_complete_findings(res, content_to_analyze, log_filename, analysis_mode)
 
     async def generate_context_summary(
         self,

@@ -20,7 +20,7 @@ export interface ActivityLog {
   message: string;
   timestamp: string; // Storing as ISO string from API
   user: string;
-  severity?: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'CRITICAL';
+  severity?: "INFO" | "SUCCESS" | "WARNING" | "ERROR" | "CRITICAL";
   metadata?: Record<string, any>;
 }
 
@@ -30,7 +30,7 @@ export interface Notification {
   message: string;
   timestamp: string; // ISO string
   read: boolean;
-  type: 'info' | 'warning' | 'error' | 'success';
+  type: "info" | "warning" | "error" | "success";
 }
 
 export interface SystemStats {
@@ -65,10 +65,64 @@ export interface Instrument {
 
 export interface DashboardBullet {
   text: string;
-  severity: 'critical' | 'warning' | 'info' | null;
+  severity: "critical" | "warning" | "info" | null;
   confidence_score?: number;
   possible_root_causes?: string[];
   pattern_name?: string;
+}
+
+export interface DashboardFinding {
+  filename: string;
+  line_number: number;
+  snippet: string;
+  severity: "critical" | "warning" | "error" | string;
+  explanation: string;
+  detected_by: string;
+}
+
+export interface KeywordArticle {
+  id?: string;
+  database_id?: number;
+  article_number: string;
+  title: string;
+  url?: string;
+  summary?: string;
+  relevance_score?: number;
+  retrieval_reason?: string;
+}
+
+export interface KeywordFinding {
+  keyword: string;
+  filename: string;
+  line_number: number;
+  matched_text: string;
+  context: string[];
+  context_start_line?: number;
+  is_error: boolean;
+  error_type?: string;
+  problem_summary?: string;
+  search_query?: string;
+  rationale: string;
+  confidence_score: number;
+  classification_source: "ai" | "deterministic_fallback" | string;
+  recommended_action?: string;
+  kb_article?: KeywordArticle | null;
+}
+
+export interface KeywordSearchResult {
+  keywords: string[];
+  total_matches: number;
+  findings: KeywordFinding[];
+}
+
+export interface KeywordSuggestion {
+  keyword: string;
+  severity: "critical" | "warning" | string;
+  occurrence_count: number;
+}
+
+export interface KeywordSuggestionsResult {
+  suggestions: KeywordSuggestion[];
 }
 
 export interface DashboardResult {
@@ -78,7 +132,7 @@ export interface DashboardResult {
   warnings: number;
   errors: number;
   healthy_apps: number;
-  overall_status: 'CRITICAL' | 'WARNING' | 'OK';
+  overall_status: "CRITICAL" | "WARNING" | "OK";
   files_analyzed: number;
   daily_summary_bullets: DashboardBullet[];
   analysis_status?: string;
@@ -89,6 +143,8 @@ export interface DashboardResult {
   original_line_count?: number;
   analyzed_line_count?: number;
   was_log_reduced?: boolean;
+  coverage_mode?: "exhaustive" | "fast";
+  complete_findings?: DashboardFinding[];
 }
 
 export interface InstrumentMemoryEntry {
