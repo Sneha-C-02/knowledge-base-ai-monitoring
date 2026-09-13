@@ -12,9 +12,13 @@ import { SignupPage } from './pages/SignupPage';
 import { ArticlePage } from './pages/ArticlePage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SystemProvider } from './context/SystemContext';
+import UserManagementPage from './pages/UserManagementPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) {
+    return null;
+  }
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -42,6 +46,7 @@ function App() {
               <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/activity" element={<ActivityPage />} />
+              <Route path="/user-management" element={<UserManagementPage />} />
               <Route path="/article/:id" element={<ArticlePage />} />
             </Route>
 

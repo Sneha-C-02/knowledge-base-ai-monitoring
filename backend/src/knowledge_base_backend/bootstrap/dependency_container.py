@@ -16,6 +16,8 @@ from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_log_event_vector_repository import SqlAlchemyLogEventVectorRepository
 
 from src.knowledge_base_backend.domain.services.log_keyword_extractor import LogKeywordExtractor
+from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_permission_repository import SqlAlchemyPermissionRepository
+from src.knowledge_base_backend.application.services.authorization_service import AuthorizationService
 
 from src.knowledge_base_backend.infrastructure.authentication.jwt_authentication_token_service import JwtAuthenticationTokenService
 from src.knowledge_base_backend.infrastructure.authentication.argon2_password_hashing_service import Argon2PasswordHashingService
@@ -57,6 +59,7 @@ from src.knowledge_base_backend.application.use_cases.create_activity import Cre
 from src.knowledge_base_backend.application.use_cases.list_notifications import ListNotificationsUseCase
 from src.knowledge_base_backend.application.services.continuous_monitoring_service import ContinuousMonitoringService
 
+
 from src.knowledge_base_backend.configuration.application_settings import settings
 
 class ApplicationContainer(containers.DeclarativeContainer):
@@ -70,6 +73,11 @@ class ApplicationContainer(containers.DeclarativeContainer):
     article_vector_repository = providers.Factory(SqlAlchemyArticleVectorSearchRepository, session=db_session)
     instrument_repository = providers.Factory(SqlAlchemyInstrumentRepository, session=db_session)
     user_repository = providers.Factory(SqlAlchemyUserRepository, session=db_session)
+    permission_repository = providers.Factory(SqlAlchemyPermissionRepository, session=db_session)
+    authorization_service = providers.Factory(
+        AuthorizationService,
+        permission_repository=permission_repository
+    )
     activity_repository = providers.Factory(SqlAlchemyActivityRepository, session=db_session)
     notification_repository = providers.Factory(SqlAlchemyNotificationRepository, session=db_session)
     monitoring_repository = providers.Factory(SqlAlchemyMonitoringRepository, session=db_session)

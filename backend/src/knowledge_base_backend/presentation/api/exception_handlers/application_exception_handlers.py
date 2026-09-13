@@ -67,7 +67,8 @@ def add_exception_handlers(app: FastAPI) -> None:
         
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        logger.error(f"Unhandled exception: {exc}", exc_info=True)
+        print("🔥 ACTUAL ERROR:", repr(exc))
+        logger.exception("🔥 FULL TRACEBACK")
         return JSONResponse(
             status_code=500,
             content={

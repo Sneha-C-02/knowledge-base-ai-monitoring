@@ -17,6 +17,7 @@ from src.knowledge_base_backend.infrastructure.database.models.notification_mode
 from src.knowledge_base_backend.infrastructure.database.models.instrument_memory_model import InstrumentMemoryModel
 from src.knowledge_base_backend.infrastructure.database.models.monitored_log_file_model import MonitoredLogFileModel
 from src.knowledge_base_backend.infrastructure.database.models.user_model import UserModel
+from src.knowledge_base_backend.infrastructure.database.models.user_group_model import UserGroupModel
 
 
 async def init_db():

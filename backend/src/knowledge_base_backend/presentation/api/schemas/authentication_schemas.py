@@ -15,6 +15,7 @@ class UserSchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     username: str
     name: str = Field(alias="display_name")
+    group_id: int
 
 class LoginResponse(BaseModel):
     token: str

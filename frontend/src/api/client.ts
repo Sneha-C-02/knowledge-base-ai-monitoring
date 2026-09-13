@@ -1,7 +1,17 @@
 import type { KBArticle, User, ActivityLog, Notification, SystemStats, PaginatedResponse, Instrument, DashboardResult, InstrumentMemoryResponse } from '../types';
 
-// Use environment variable for API URL or fallback to localhost
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+// In development, Vite proxies this relative path to the backend. A deployed
+// frontend can still provide its backend URL through VITE_API_URL.
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const API_ROOT_URL = API_BASE_URL.endsWith('/api')
+  ? API_BASE_URL.slice(0, -'/api'.length)
+  : API_BASE_URL;
+
+export interface ManagedUser {
+  id: number;
+  username: string;
+  group_id: number | null;
+}
 
 class ApiClient {
   private getHeaders() {
@@ -12,7 +22,11 @@ class ApiClient {
     };
   }
 
-  private async fetch<T>(endpoint: string, options?: RequestInit & { isFileUpload?: boolean }): Promise<T> {
+  private async fetch<T>(
+    endpoint: string,
+    options?: RequestInit & { isFileUpload?: boolean },
+    useApiPrefix: boolean = true,
+  ): Promise<T> {
     const headers: Record<string, string> = this.getHeaders();
 
     // For FormData, the browser must set the Content-Type with the correct boundary
@@ -21,7 +35,8 @@ class ApiClient {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const baseUrl = useApiPrefix ? API_BASE_URL : API_ROOT_URL;
+      const response = await fetch(`${baseUrl}${endpoint}`, {
         ...options,
         headers: {
           ...headers,
@@ -40,7 +55,18 @@ class ApiClient {
         }
 
         const errorText = await response.text();
-        throw new Error(`API Error: ${response.status} - ${errorText}`);
+        let message = `API Error: ${response.status} - ${errorText}`;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed?.detail) {
+            message = parsed.detail;
+          } else if (parsed?.error?.message) {
+            message = parsed.error.message;
+          }
+        } catch {
+          // ignore JSON parse error
+        }
+        throw new Error(message);
       }
 
       return response.json();
@@ -73,6 +99,18 @@ class ApiClient {
         display_name,
       }),
     });
+  }
+
+  // --- User Management ---
+  async getManagedUsers(): Promise<ManagedUser[]> {
+    return this.fetch<ManagedUser[]>('/users/management/users', undefined, false);
+  }
+
+  async changeManagedUserGroup(userId: number, groupId: number): Promise<void> {
+    return this.fetch<void>(`/users/management/users/${userId}/group`, {
+      method: 'PUT',
+      body: JSON.stringify({ group_id: groupId }),
+    }, false);
   }
 
   // --- Knowledge Base ---

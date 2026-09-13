@@ -5,10 +5,11 @@ from src.knowledge_base_backend.domain.repositories.user_repository import UserR
 from src.knowledge_base_backend.domain.entities.user_account import UserAccount
 from src.knowledge_base_backend.infrastructure.database.models.user_model import UserModel
 
+
 class SqlAlchemyUserRepository(UserRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        
+
     def _map_to_domain(self, model: UserModel) -> UserAccount:
         return UserAccount(
             id=model.id,
@@ -16,6 +17,7 @@ class SqlAlchemyUserRepository(UserRepository):
             display_name=model.display_name,
             password_hash=model.password_hash,
             is_active=model.is_active,
+            group_id=model.group_id,
             created_at=model.created_at,
             updated_at=model.updated_at
         )
@@ -27,13 +29,19 @@ class SqlAlchemyUserRepository(UserRepository):
         if model:
             return self._map_to_domain(model)
         return None
-        
+
     async def get_by_id(self, id: int) -> Optional[UserAccount]:
         model = await self.session.get(UserModel, id)
         if model:
             return self._map_to_domain(model)
         return None
-        
+
+    async def get_all(self) -> list[UserAccount]:
+        query = select(UserModel)
+        result = await self.session.execute(query)
+        models = result.scalars().all()
+        return [self._map_to_domain(model) for model in models]
+
     async def save(self, user: UserAccount) -> UserAccount:
         if user.id == 0:
             model = UserModel(
@@ -41,6 +49,7 @@ class SqlAlchemyUserRepository(UserRepository):
                 display_name=user.display_name,
                 password_hash=user.password_hash,
                 is_active=user.is_active,
+                group_id=user.group_id,
                 created_at=user.created_at,
                 updated_at=user.updated_at
             )
@@ -54,6 +63,8 @@ class SqlAlchemyUserRepository(UserRepository):
                 model.display_name = user.display_name
                 model.password_hash = user.password_hash
                 model.is_active = user.is_active
+                model.group_id = user.group_id
                 model.updated_at = user.updated_at
                 await self.session.flush()
+
         return user

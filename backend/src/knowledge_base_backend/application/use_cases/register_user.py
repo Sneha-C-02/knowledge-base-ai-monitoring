@@ -65,6 +65,7 @@ class RegisterUserUseCase:
             display_name=final_display_name,
             password_hash=password_hash,
             is_active=True,
+            group_id=3,
             created_at=now,
             updated_at=now
         )

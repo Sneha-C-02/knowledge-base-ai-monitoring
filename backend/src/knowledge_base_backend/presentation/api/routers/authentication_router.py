@@ -22,7 +22,11 @@ async def login(
     result = await use_case.execute(request.username, request.password)
     return LoginResponse(
         token=result.token,
-        user=UserSchema(username=result.user.username, display_name=result.user.display_name)
+        user=UserSchema(
+            username=result.user.username,
+            display_name=result.user.display_name,
+            group_id=result.user.group_id
+        )
     )
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -40,5 +44,9 @@ async def register(
     return RegisterResponse(
         message="User registered successfully",
         token=result.token,
-        user=UserSchema(username=result.user.username, display_name=result.user.display_name)
+        user=UserSchema(
+            username=result.user.username,
+            display_name=result.user.display_name,
+            group_id=result.user.group_id
+        )
     )
