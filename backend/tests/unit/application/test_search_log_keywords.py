@@ -8,7 +8,7 @@ from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_dash
 
 class AcceptingValidator:
     def validate_uploaded_log_file(self, filename: str, file_stream: BytesIO) -> None:
-        assert filename.endswith(".log")
+        assert filename.endswith((".log", ".txt"))
 
 
 class ClassifyingService:

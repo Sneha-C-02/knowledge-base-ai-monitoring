@@ -429,12 +429,22 @@ class AnalyzeLogsWithMemoryUseCase:
         """Enrich each complete_finding with the best-matching KB article."""
         for finding in result.complete_findings:
             try:
-                query = finding.explanation or finding.snippet
-                if not query or len(query.strip()) < 5:
-                    continue
-                matches = await self.retrieval_service.retrieve_relevant_articles(
-                    query, instrument_name, limit=1
-                )
+                candidates: List[str] = []
+                for cand in (finding.explanation, finding.snippet):
+                    if cand and isinstance(cand, str) and len(cand.strip()) >= 5 and cand.strip() not in candidates:
+                        candidates.append(cand.strip())
+                
+                matches = []
+                for query in candidates:
+                    try:
+                        matches = await self.retrieval_service.retrieve_relevant_articles(
+                            query, instrument_name, limit=1
+                        )
+                        if matches:
+                            break
+                    except Exception:
+                        continue
+
                 if matches:
                     top = matches[0]
                     content = top.article.searchable_content or ""

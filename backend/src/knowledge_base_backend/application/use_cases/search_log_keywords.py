@@ -119,32 +119,35 @@ class SearchLogKeywordsUseCase:
 
         if self.retrieval_service:
             for finding in findings:
-                search_query = finding.get("search_query")
-                is_error = finding.get("is_error", False)
                 finding["kb_article"] = None
-                if search_query:
-                    try:
-                        matches = await self.retrieval_service.retrieve_relevant_articles(search_query, None, limit=1)
-                        if not matches and is_error:
-                            alt_query = finding.get("error_type") or finding.get("keyword")
-                            if alt_query and alt_query != search_query:
-                                matches = await self.retrieval_service.retrieve_relevant_articles(alt_query, None, limit=1)
+                candidates: List[str] = []
+                for key in ("search_query", "error_type", "keyword", "matched_text"):
+                    v = finding.get(key)
+                    if v and isinstance(v, str) and v.strip() and v.strip() not in candidates:
+                        candidates.append(v.strip())
 
+                matches = []
+                for cand in candidates:
+                    try:
+                        matches = await self.retrieval_service.retrieve_relevant_articles(cand, None, limit=1)
                         if matches:
-                            top = matches[0]
-                            content = top.article.searchable_content or ""
-                            snippet = content[:280].strip() + ("..." if len(content) > 280 else "")
-                            finding["kb_article"] = {
-                                "id": str(top.article.id),
-                                "database_id": top.article.database_id,
-                                "article_number": top.article.article_number,
-                                "title": top.article.title,
-                                "url": top.article.url or f"/article/{top.article.article_number}",
-                                "summary": snippet,
-                                "relevance_score": round(float(top.combined_relevance_score), 2),
-                                "retrieval_reason": top.retrieval_reason or "Direct match for diagnosed problem",
-                            }
+                            break
                     except Exception:
-                        finding["kb_article"] = None
+                        continue
+
+                if matches:
+                    top = matches[0]
+                    content = top.article.searchable_content or ""
+                    snippet = content[:280].strip() + ("..." if len(content) > 280 else "")
+                    finding["kb_article"] = {
+                        "id": str(top.article.id),
+                        "database_id": top.article.database_id,
+                        "article_number": top.article.article_number,
+                        "title": top.article.title,
+                        "url": top.article.url or f"/article/{top.article.article_number}",
+                        "summary": snippet,
+                        "relevance_score": round(float(top.combined_relevance_score), 2),
+                        "retrieval_reason": top.retrieval_reason or "Direct match for diagnosed problem",
+                    }
 
         return KeywordSearchResult(keywords=normalized, findings=findings)

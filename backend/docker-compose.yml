@@ -8,5 +8,6 @@ services:
       - .env
     volumes:
       - ./src:/app/src
+      - ./tests:/app/tests
     command: uvicorn src.knowledge_base_backend.main:app --host 0.0.0.0 --port 3000 --reload
 

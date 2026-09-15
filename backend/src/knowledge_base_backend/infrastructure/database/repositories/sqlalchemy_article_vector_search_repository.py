@@ -1,4 +1,4 @@
-﻿from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from sqlalchemy import select, text
 from src.knowledge_base_backend.domain.repositories.article_vector_search_repository import ArticleVectorSearchRepository

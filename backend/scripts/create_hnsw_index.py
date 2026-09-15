@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import os
 import sys
 from sqlalchemy import text

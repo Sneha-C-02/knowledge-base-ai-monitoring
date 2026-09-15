@@ -48,7 +48,7 @@ class LogDateFilter:
 
         filtered: List[str] = []
         for line in lines:
-            ts = self._parse_timestamp(line)
+            ts = cls._parse_timestamp(line, date_from=date_from, date_to=date_to)
             if ts is None:
                 # Cannot determine date — keep the line (safe default)
                 filtered.append(line)
@@ -62,8 +62,13 @@ class LogDateFilter:
 
         return filtered
 
-    @staticmethod
-    def _parse_timestamp(line: str) -> Optional[datetime]:
+    @classmethod
+    def _parse_timestamp(
+        cls,
+        line: str,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> Optional[datetime]:
         """Attempt to extract a datetime from the beginning of a log line."""
         for pattern, fmt in _TIMESTAMP_PATTERNS:
             match = pattern.search(line)
@@ -73,7 +78,14 @@ class LogDateFilter:
                 if "T" not in raw and fmt == "%Y-%m-%dT%H:%M:%S":
                     fmt = "%Y-%m-%d %H:%M:%S"
                 try:
-                    return datetime.strptime(raw, fmt)
+                    ts = datetime.strptime(raw, fmt)
+                    if ts.year == 1900:
+                        ref_year = (date_from or date_to or datetime.now()).year
+                        try:
+                            ts = ts.replace(year=ref_year)
+                        except ValueError:
+                            pass
+                    return ts
                 except ValueError:
                     continue
         return None

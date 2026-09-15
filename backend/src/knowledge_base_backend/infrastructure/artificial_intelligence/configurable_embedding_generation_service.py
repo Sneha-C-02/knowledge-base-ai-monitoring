@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 from typing import List, Any
 from src.knowledge_base_backend.domain.services.embedding_generation_service import EmbeddingGenerationService
 from src.knowledge_base_backend.domain.value_objects.text_embedding import TextEmbedding

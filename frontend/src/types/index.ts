@@ -1,12 +1,16 @@
 export interface KBArticle {
   id: string;
   title: string;
-  category: string;
+  category?: string;
   description: string;
-  keywords: string[];
+  keywords?: string[];
   last_updated: string;
-  views: number;
-  resolution_steps: string[];
+  views?: number;
+  resolution_steps?: string[];
+  article_number?: string;
+  database_id?: number;
+  url?: string;
+  instruments?: string[];
 }
 
 export interface User {

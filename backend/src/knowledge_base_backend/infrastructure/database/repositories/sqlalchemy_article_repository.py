@@ -1,4 +1,4 @@
-﻿from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
 from sqlalchemy import select, func, or_, desc, asc
 from typing import List, Optional, Tuple
@@ -131,31 +131,81 @@ class SqlAlchemyArticleRepository(ArticleRepository):
         return [self._map_to_domain(model) for model in models]
         
     async def search_articles_by_full_text(self, criteria: ArticleSearchCriteria, limit: int) -> List[Tuple[KnowledgeBaseArticle, float]]:
-        query = select(ArticleModel).options(selectinload(ArticleModel.instruments))
-        
-        ts_rank_col = None
-        if criteria.search_query and criteria.search_query.strip():
-            ts_query = func.websearch_to_tsquery('english', criteria.search_query)
-            ts_vector = func.to_tsvector('english', ArticleModel.title + ' ' + ArticleModel.searchable_content)
-            query = query.where(ts_vector.op('@@')(ts_query))
-            ts_rank_col = func.ts_rank(ts_vector, ts_query).label('rank')
-            query = query.add_columns(ts_rank_col).order_by(ts_rank_col.desc())
-        
-        if criteria.instrument_name:
-            query = query.join(ArticleModel.instruments).where(
-                InstrumentModel.name == criteria.instrument_name
+        if not criteria.search_query or not criteria.search_query.strip():
+            query = select(ArticleModel).options(selectinload(ArticleModel.instruments))
+            if criteria.instrument_name:
+                query = query.join(ArticleModel.instruments).where(InstrumentModel.name == criteria.instrument_name)
+            query = query.add_columns(func.cast(1.0, sqlalchemy.Float).label('rank')).order_by(ArticleModel.id).limit(limit)
+            result = await self.session.execute(query)
+            return [(self._map_to_domain(row[0]), float(row[1])) for row in result.all()]
+
+        clean_text = criteria.search_query.strip()
+        ts_vector = func.to_tsvector('english', ArticleModel.title + ' ' + ArticleModel.searchable_content)
+
+        # 1. Primary search: websearch_to_tsquery (exact terms & phrases)
+        try:
+            ts_web = func.websearch_to_tsquery('english', clean_text)
+            query = (
+                select(ArticleModel)
+                .options(selectinload(ArticleModel.instruments))
+                .where(ts_vector.op('@@')(ts_web))
             )
-            
-        if ts_rank_col is None:
-            # No text query, just add a dummy rank of 1.0 and order by ID
-            query = query.add_columns(func.cast(1.0, sqlalchemy.Float).label('rank')).order_by(ArticleModel.id)
-            
-        query = query.limit(limit)
-        
-        result = await self.session.execute(query)
-        rows = result.all()
-        
-        return [(self._map_to_domain(row[0]), float(row[1])) for row in rows]
+            if criteria.instrument_name:
+                query = query.join(ArticleModel.instruments).where(InstrumentModel.name == criteria.instrument_name)
+            ts_rank = func.ts_rank(ts_vector, ts_web).label('rank')
+            query = query.add_columns(ts_rank).order_by(ts_rank.desc()).limit(limit)
+            result = await self.session.execute(query)
+            rows = result.all()
+            if rows:
+                return [(self._map_to_domain(row[0]), float(row[1])) for row in rows]
+        except Exception:
+            pass
+
+        # 2. Secondary search: flexible OR tsquery across distinctive keywords
+        import re
+        words = re.findall(r'\b[A-Za-z0-9_]{3,}\b', clean_text)
+        stopwords = {'and', 'the', 'for', 'with', 'from', 'called', 'handler', 'value', 'parameter', 'while'}
+        meaningful = [w for w in words if w.lower() not in stopwords]
+        if meaningful:
+            or_expr = ' | '.join(meaningful[:8])
+            try:
+                ts_or = func.to_tsquery('english', or_expr)
+                query = (
+                    select(ArticleModel)
+                    .options(selectinload(ArticleModel.instruments))
+                    .where(ts_vector.op('@@')(ts_or))
+                )
+                if criteria.instrument_name:
+                    query = query.join(ArticleModel.instruments).where(InstrumentModel.name == criteria.instrument_name)
+                ts_rank = func.ts_rank(ts_vector, ts_or).label('rank')
+                query = query.add_columns(ts_rank).order_by(ts_rank.desc()).limit(limit)
+                result = await self.session.execute(query)
+                rows = result.all()
+                if rows:
+                    return [(self._map_to_domain(row[0]), float(row[1])) for row in rows]
+            except Exception:
+                pass
+
+        # 3. Tertiary search: plainto_tsquery
+        try:
+            ts_plain = func.plainto_tsquery('english', clean_text)
+            query = (
+                select(ArticleModel)
+                .options(selectinload(ArticleModel.instruments))
+                .where(ts_vector.op('@@')(ts_plain))
+            )
+            if criteria.instrument_name:
+                query = query.join(ArticleModel.instruments).where(InstrumentModel.name == criteria.instrument_name)
+            ts_rank = func.ts_rank(ts_vector, ts_plain).label('rank')
+            query = query.add_columns(ts_rank).order_by(ts_rank.desc()).limit(limit)
+            result = await self.session.execute(query)
+            rows = result.all()
+            if rows:
+                return [(self._map_to_domain(row[0]), float(row[1])) for row in rows]
+        except Exception:
+            pass
+
+        return []
 
     async def count_all_articles(self) -> int:
         query = select(func.count(ArticleModel.id))

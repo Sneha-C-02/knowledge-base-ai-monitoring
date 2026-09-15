@@ -1,4 +1,4 @@
-﻿from typing import List, Optional
+from typing import List, Optional
 from src.knowledge_base_backend.domain.services.hybrid_article_retrieval_service import HybridArticleRetrievalService
 from src.knowledge_base_backend.domain.value_objects.relevant_article_match import RelevantArticleMatch
 from src.knowledge_base_backend.domain.repositories.article_repository import ArticleRepository

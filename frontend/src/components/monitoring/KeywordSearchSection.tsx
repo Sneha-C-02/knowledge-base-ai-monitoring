@@ -1,21 +1,18 @@
 import { useState, useMemo } from "react";
-import { Link } from "react-router-dom";
 import {
   Search,
   AlertCircle,
   CheckCircle2,
   FileText,
-  BookOpen,
   Copy,
   Check,
   Filter,
   X,
   Zap,
   Activity,
-  ArrowUpRight,
 } from "lucide-react";
 import { clsx } from "clsx";
-import { Button } from "../common/Button";
+import { AutoKbSolution } from "./AutoKbSolution";
 import type { KeywordSearchResult, KeywordFinding } from "../../types";
 
 interface KeywordSearchSectionProps {
@@ -383,95 +380,22 @@ export function KeywordSearchSection({
                       )}
                     </div>
 
-                    {/* B. Valid Knowledge Base Article Card */}
-                    <div className="rounded-lg border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-blue-50/50 to-white p-4 shadow-xs">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-6 w-6 items-center justify-center rounded bg-indigo-600 text-white shadow-xs">
-                            <BookOpen size={13} />
-                          </div>
-                          <span className="text-xs font-bold uppercase tracking-wider text-indigo-900">
-                            Knowledge Base Solution
-                          </span>
-                        </div>
-                        {finding.kb_article && (
-                          <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-800">
-                            Article {finding.kb_article.article_number}
-                          </span>
-                        )}
-                      </div>
-
-                      {finding.kb_article ? (
-                        <div className="space-y-2 mt-2">
-                          <Link
-                            to={`/article/${finding.kb_article.article_number}`}
-                            className="text-sm font-bold text-indigo-700 hover:text-indigo-900 hover:underline flex items-center gap-1.5 group"
-                          >
-                            <span>{finding.kb_article.title}</span>
-                            <ArrowUpRight
-                              size={15}
-                              className="text-indigo-500 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"
-                            />
-                          </Link>
-
-                          {finding.kb_article.summary && (
-                            <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
-                              {finding.kb_article.summary}
-                            </p>
-                          )}
-
-                          <div className="pt-2 flex items-center justify-between gap-2 border-t border-indigo-100/60">
-                            <span className="text-[11px] text-indigo-600 font-medium">
-                              {finding.kb_article.relevance_score
-                                ? `${Math.round(finding.kb_article.relevance_score * 100)}% Match`
-                                : "Relevant Resolution"}
-                            </span>
-
-                            <Link
-                              to={`/article/${finding.kb_article.article_number}`}
-                            >
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-100 bg-white"
-                              >
-                                View Knowledge Base Article
-                              </Button>
-                            </Link>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-2 mt-1">
-                          <p className="text-xs text-slate-600">
-                            No direct Waters article in local cache. Search the
-                            full Knowledge Base library for this error signature:
-                          </p>
-                          <div className="flex items-center gap-2 pt-1">
-                            <Link
-                              to={`/knowledge-base?search=${encodeURIComponent(
-                                finding.search_query ||
-                                  finding.error_type ||
-                                  finding.keyword,
-                              )}`}
-                            >
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-100 bg-white"
-                              >
-                                <Search size={13} className="mr-1.5" />
-                                Search KB for "
-                                {(finding.error_type || finding.keyword).slice(
-                                  0,
-                                  28,
-                                )}
-                                ..."
-                              </Button>
-                            </Link>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    {/* B. Automatic Knowledge Base Article Resolution */}
+                    <AutoKbSolution
+                      initialArticle={finding.kb_article}
+                      searchQuery={
+                        finding.search_query ||
+                        finding.error_type ||
+                        finding.keyword
+                      }
+                      candidateQueries={[
+                        finding.error_type,
+                        finding.search_query,
+                        finding.keyword,
+                        finding.matched_text,
+                      ]}
+                      isError={finding.is_error}
+                    />
                   </div>
 
                   {/* RIGHT SIDE: SURROUNDING LOG CONTEXT INSPECTOR (5 cols) */}

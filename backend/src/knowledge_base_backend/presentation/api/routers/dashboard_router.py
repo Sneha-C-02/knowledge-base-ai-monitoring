@@ -36,6 +36,48 @@ from src.knowledge_base_backend.presentation.api.schemas.dashboard_schemas impor
     LogDashboardResponse,
 )
 
+def parse_flexible_date(date_str: str) -> datetime:
+    """Parse date string with or without year, supporting Waters log format."""
+    clean = date_str.strip()
+    current_year = datetime.now().year
+    try:
+        return datetime.fromisoformat(clean)
+    except ValueError:
+        pass
+
+    # Formats without year (e.g. MM-DDTHH:MM, MM-DDTHH:MM:SS, MM-DD HH:MM)
+    for fmt in (
+        "%m-%dT%H:%M:%S",
+        "%m-%dT%H:%M",
+        "%m-%d %H:%M:%S",
+        "%m-%d %H:%M",
+        "%m/%d %H:%M:%S",
+        "%m/%d %H:%M",
+    ):
+        try:
+            return datetime.strptime(clean, fmt).replace(year=current_year)
+        except ValueError:
+            pass
+
+    # Waters log style formats without year (e.g. "Oct 20 11:28:57 AM", "Oct 20 11:28")
+    for fmt in (
+        "%b %d %I:%M:%S %p",
+        "%b %d %I:%M %p",
+        "%b %d %H:%M:%S",
+        "%b %d %H:%M",
+        "%B %d %I:%M:%S %p",
+        "%B %d %I:%M %p",
+        "%B %d %H:%M:%S",
+        "%B %d %H:%M",
+    ):
+        try:
+            return datetime.strptime(clean, fmt).replace(year=current_year)
+        except ValueError:
+            pass
+
+    raise ValueError(f"Unable to parse date string: {date_str}")
+
+
 router = APIRouter(prefix="/monitoring/dashboard", tags=["Log Dashboard"])
 
 
@@ -80,12 +122,12 @@ async def analyze_logs_with_dashboard(
     parsed_date_to = None
     if date_from:
         try:
-            parsed_date_from = datetime.fromisoformat(date_from)
+            parsed_date_from = parse_flexible_date(date_from)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid date_from format: {date_from}")
     if date_to:
         try:
-            parsed_date_to = datetime.fromisoformat(date_to)
+            parsed_date_to = parse_flexible_date(date_to)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid date_to format: {date_to}")
 
@@ -159,12 +201,12 @@ async def search_log_keywords(
     parsed_date_to = None
     if date_from:
         try:
-            parsed_date_from = datetime.fromisoformat(date_from)
+            parsed_date_from = parse_flexible_date(date_from)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid date_from format: {date_from}")
     if date_to:
         try:
-            parsed_date_to = datetime.fromisoformat(date_to)
+            parsed_date_to = parse_flexible_date(date_to)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid date_to format: {date_to}")
 

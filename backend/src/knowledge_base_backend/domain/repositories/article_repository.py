@@ -1,4 +1,4 @@
-﻿from typing import Protocol, List, Optional, Tuple
+from typing import Protocol, List, Optional, Tuple
 from src.knowledge_base_backend.domain.entities.knowledge_base_article import KnowledgeBaseArticle
 from src.knowledge_base_backend.domain.value_objects.article_search_criteria import ArticleSearchCriteria
 from src.knowledge_base_backend.domain.value_objects.pagination_request import PaginationRequest

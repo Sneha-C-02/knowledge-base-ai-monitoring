@@ -1,4 +1,4 @@
-﻿from sqlalchemy import Column, BigInteger, String, Text, DateTime, ForeignKey, Table
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, ForeignKey, Table
 from sqlalchemy.orm import relationship
 from src.knowledge_base_backend.infrastructure.database.sqlalchemy_base import Base
 from pgvector.sqlalchemy import Vector

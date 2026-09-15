@@ -1,4 +1,4 @@
-﻿from src.knowledge_base_backend.domain.repositories.activity_repository import ActivityRepository
+from src.knowledge_base_backend.domain.repositories.activity_repository import ActivityRepository
 from src.knowledge_base_backend.domain.services.date_time_provider import DateTimeProvider
 from src.knowledge_base_backend.domain.entities.system_activity import SystemActivity
 import uuid
