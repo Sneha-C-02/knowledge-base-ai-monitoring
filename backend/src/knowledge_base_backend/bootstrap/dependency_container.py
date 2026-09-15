@@ -316,6 +316,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         monitored_file_repository=monitored_log_file_repository,
         date_time_provider=date_time_provider,
         keyword_learning_coordinator=keyword_learning_coordinator,
+        retrieval_service=hybrid_retrieval_service,
     )
 
     search_log_keywords_use_case = providers.Factory(

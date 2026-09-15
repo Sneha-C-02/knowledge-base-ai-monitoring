@@ -16,6 +16,17 @@ class DashboardSummaryBulletSchema(BaseModel):
     pattern_name: Optional[str] = None
 
 
+class KeywordArticleSchema(BaseModel):
+    id: Optional[str] = None
+    database_id: Optional[int] = None
+    article_number: str
+    title: str
+    url: Optional[str] = None
+    summary: Optional[str] = None
+    relevance_score: Optional[float] = None
+    retrieval_reason: Optional[str] = None
+
+
 class DashboardFindingSchema(BaseModel):
     filename: str
     line_number: int
@@ -23,6 +34,7 @@ class DashboardFindingSchema(BaseModel):
     severity: str
     explanation: str
     detected_by: str
+    kb_article: Optional[KeywordArticleSchema] = None
 
 
 class LogDashboardResponse(BaseModel):
@@ -45,17 +57,10 @@ class LogDashboardResponse(BaseModel):
     was_log_reduced: bool = False
     coverage_mode: str = "exhaustive"
     complete_findings: List[DashboardFindingSchema] = Field(default_factory=list)
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
 
 
-class KeywordArticleSchema(BaseModel):
-    id: Optional[str] = None
-    database_id: Optional[int] = None
-    article_number: str
-    title: str
-    url: Optional[str] = None
-    summary: Optional[str] = None
-    relevance_score: Optional[float] = None
-    retrieval_reason: Optional[str] = None
 
 
 class KeywordFindingSchema(BaseModel):

@@ -20,6 +20,7 @@ class DashboardFinding:
     severity: str
     explanation: str
     detected_by: str = "rule"
+    kb_article: Optional[dict] = None
 
 
 @dataclass

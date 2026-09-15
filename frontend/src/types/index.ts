@@ -78,6 +78,7 @@ export interface DashboardFinding {
   severity: "critical" | "warning" | "error" | string;
   explanation: string;
   detected_by: string;
+  kb_article?: KeywordArticle | null;
 }
 
 export interface KeywordArticle {

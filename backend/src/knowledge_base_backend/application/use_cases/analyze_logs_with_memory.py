@@ -3,7 +3,8 @@ import json
 import logging
 import re
 import uuid
-from typing import BinaryIO, List, Tuple
+from datetime import datetime as dt
+from typing import BinaryIO, List, Optional, Tuple
 
 import aiofiles
 
@@ -22,6 +23,8 @@ from src.knowledge_base_backend.domain.value_objects.log_dashboard_result import
     DashboardSummaryBullet,
     LogDashboardResult,
 )
+from src.knowledge_base_backend.domain.services.log_date_filter import LogDateFilter
+from src.knowledge_base_backend.domain.services.hybrid_article_retrieval_service import HybridArticleRetrievalService
 from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_dashboard_analysis_service import (
     GroqDashboardAnalysisService,
 )
@@ -62,6 +65,7 @@ class AnalyzeLogsWithMemoryUseCase:
         monitored_file_repository: MonitoredLogFileRepository,
         date_time_provider: DateTimeProvider,
         keyword_learning_coordinator: KeywordLearningCoordinator,
+        retrieval_service: Optional[HybridArticleRetrievalService] = None,
     ) -> None:
         self.validator = validator
         self.storage = storage
@@ -72,6 +76,8 @@ class AnalyzeLogsWithMemoryUseCase:
         self.monitored_file_repository = monitored_file_repository
         self.date_time_provider = date_time_provider
         self.keyword_learning_coordinator = keyword_learning_coordinator
+        self.retrieval_service = retrieval_service
+        self.date_filter = LogDateFilter()
 
     async def _extract_instrument_name(self, stream: BinaryIO) -> str:
         pos = stream.tell()
@@ -98,7 +104,13 @@ class AnalyzeLogsWithMemoryUseCase:
 
         return "Unknown Instrument"
 
-    async def execute(self, files: List[Tuple[str, BinaryIO]], analysis_mode: str = "exhaustive") -> LogDashboardResult:
+    async def execute(
+        self,
+        files: List[Tuple[str, BinaryIO]],
+        analysis_mode: str = "exhaustive",
+        date_from: Optional[dt] = None,
+        date_to: Optional[dt] = None,
+    ) -> LogDashboardResult:
         if not files:
             raise ValueError("No files provided for analysis")
 
@@ -149,6 +161,8 @@ class AnalyzeLogsWithMemoryUseCase:
                 instrument_name=instrument.name,
                 memory_entries=memory_entries,
                 analysis_mode=analysis_mode,
+                date_from=date_from,
+                date_to=date_to,
             )
 
             # Aggregate results across multiple files
@@ -213,7 +227,11 @@ class AnalyzeLogsWithMemoryUseCase:
             elif result.overall_status == "WARNING" and aggregated_result.overall_status != "CRITICAL":
                 aggregated_result.overall_status = "WARNING"
 
-        # --- Step 5: Create dashboard notification ---
+        # --- Step 5: Enrich findings with KB articles ---
+        if self.retrieval_service:
+            await self._attach_kb_articles(aggregated_result, instrument.name)
+
+        # --- Step 6: Create dashboard notification ---
         await self._create_dashboard_notification(aggregated_result)
 
         return aggregated_result
@@ -226,6 +244,8 @@ class AnalyzeLogsWithMemoryUseCase:
         instrument_name: str,
         memory_entries: list,
         analysis_mode: str,
+        date_from: Optional[dt] = None,
+        date_to: Optional[dt] = None,
     ) -> LogDashboardResult:
         """
         Process a single log file. Determines whether this is an initial mapping
@@ -238,7 +258,19 @@ class AnalyzeLogsWithMemoryUseCase:
             full_content = await f.read()
 
         all_lines = full_content.split("\n")
-        total_lines = len(all_lines)
+
+        # Apply date range filter if specified
+        if date_from or date_to:
+            filtered_lines = self.date_filter.filter_lines(all_lines, date_from, date_to)
+            logger.info(
+                "Date filter applied: %d → %d lines (from=%s, to=%s)",
+                len(all_lines), len(filtered_lines), date_from, date_to,
+            )
+            analysis_content = "\n".join(filtered_lines)
+            total_lines = len(filtered_lines)
+        else:
+            analysis_content = full_content
+            total_lines = len(all_lines)
 
         # Learn error-related keywords from this file's critical/warning lines,
         # so future keyword searches can suggest terms grounded in real errors.
@@ -252,7 +284,7 @@ class AnalyzeLogsWithMemoryUseCase:
             # INITIAL MAPPING: First time this file is added
             # ============================================
             result = await self.ai_service.analyze_full_log_with_memory(
-                log_content=full_content,
+                log_content=analysis_content,
                 log_filename=filename,
                 instrument_id=instrument_id,
                 instrument_name=instrument_name,
@@ -262,7 +294,7 @@ class AnalyzeLogsWithMemoryUseCase:
 
             # Generate a context summary for storage
             context_summary = await self.ai_service.generate_context_summary(
-                log_content=full_content,
+                log_content=analysis_content,
                 existing_summary=None,
                 log_filename=filename,
                 instrument_name=instrument_name,
@@ -291,7 +323,7 @@ class AnalyzeLogsWithMemoryUseCase:
                 # Exhaustive mode always revisits the complete file. A fast sampled re-upload
                 # without new lines also receives a fresh result rather than silent zeros.
                 result = await self.ai_service.analyze_full_log_with_memory(
-                    log_content=full_content,
+                    log_content=analysis_content,
                     log_filename=filename,
                     instrument_id=instrument_id,
                     instrument_name=instrument_name,
@@ -300,7 +332,7 @@ class AnalyzeLogsWithMemoryUseCase:
                 )
                 # Update the context summary to stay current
                 context_summary = await self.ai_service.generate_context_summary(
-                    log_content=full_content,
+                    log_content=analysis_content,
                     existing_summary=monitored.full_context_summary,
                     log_filename=filename,
                     instrument_name=instrument_name,
@@ -390,3 +422,33 @@ class AnalyzeLogsWithMemoryUseCase:
             created_at=datetime.datetime.utcnow(),
         )
         await self.notification_repository.save(notification)
+
+    async def _attach_kb_articles(
+        self, result: LogDashboardResult, instrument_name: str
+    ) -> None:
+        """Enrich each complete_finding with the best-matching KB article."""
+        for finding in result.complete_findings:
+            try:
+                query = finding.explanation or finding.snippet
+                if not query or len(query.strip()) < 5:
+                    continue
+                matches = await self.retrieval_service.retrieve_relevant_articles(
+                    query, instrument_name, limit=1
+                )
+                if matches:
+                    top = matches[0]
+                    content = top.article.searchable_content or ""
+                    snippet = content[:280].strip() + ("..." if len(content) > 280 else "")
+                    finding.kb_article = {
+                        "id": str(top.article.id),
+                        "database_id": top.article.database_id,
+                        "article_number": top.article.article_number,
+                        "title": top.article.title,
+                        "url": top.article.url or f"/article/{top.article.article_number}",
+                        "summary": snippet,
+                        "relevance_score": round(float(top.combined_relevance_score), 2),
+                        "retrieval_reason": top.retrieval_reason or "Matched finding from log analysis",
+                    }
+            except Exception:
+                logger.debug("KB article lookup failed for finding line %d", finding.line_number)
+                finding.kb_article = None

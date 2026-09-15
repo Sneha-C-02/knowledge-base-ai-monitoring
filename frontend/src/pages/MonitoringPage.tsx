@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
   Play,
   FileText,
@@ -18,6 +19,9 @@ import {
   ThumbsDown,
   Search,
   Tags,
+  Calendar,
+  BookOpen,
+  ArrowUpRight,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { KeywordSearchSection } from "../components/monitoring/KeywordSearchSection";
@@ -161,6 +165,10 @@ export function MonitoringPage() {
     refreshKeywordSuggestions,
     analysisMode,
     setAnalysisMode,
+    dateFrom,
+    setDateFrom,
+    dateTo,
+    setDateTo,
     isMonitoring,
     isKeywordSearching,
     error,
@@ -443,6 +451,57 @@ export function MonitoringPage() {
               >
                 <Plus size={16} className="mr-1" /> Add Another File
               </Button>
+            </div>
+
+            {/* Date & Time Range Filter */}
+            <div className="border-t border-slate-200 pt-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <Calendar size={17} className="text-primary-600" />
+                  <span>Date &amp; Time Range Filter (Optional)</span>
+                </div>
+                {(dateFrom || dateTo) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                    className="text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-1 cursor-pointer"
+                  >
+                    <X size={13} /> Clear Date Filter
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Filter and analyze only log entries within a specific timestamp window. Leave empty to analyze all log lines.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Start Date / Time (From)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    disabled={isMonitoring || isKeywordSearching}
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-primary-500 focus:ring-primary-500 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    End Date / Time (To)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    disabled={isMonitoring || isKeywordSearching}
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-primary-500 focus:ring-primary-500 bg-white"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="border-t border-slate-200 pt-5 space-y-3">
@@ -850,12 +909,12 @@ export function MonitoringPage() {
                         <div
                           key={`${finding.filename}-${finding.line_number}-${index}`}
                           className={clsx(
-                            "border-l-4 px-4 py-3",
+                            "border-l-4 px-4 py-3 space-y-2",
                             finding.severity === "critical"
-                              ? "border-l-red-600 bg-red-50"
+                              ? "border-l-red-600 bg-red-50/70"
                               : finding.severity === "error"
-                                ? "border-l-orange-500 bg-orange-50"
-                                : "border-l-amber-500 bg-amber-50",
+                                ? "border-l-orange-500 bg-orange-50/70"
+                                : "border-l-amber-500 bg-amber-50/70",
                           )}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -873,12 +932,74 @@ export function MonitoringPage() {
                               {finding.severity.toUpperCase()}
                             </Badge>
                           </div>
-                          <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-700">
+                          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-slate-700 bg-white/80 p-2 rounded border border-slate-200/60">
                             {finding.snippet}
                           </pre>
-                          <p className="mt-1 text-xs text-slate-500">
+                          <p className="text-xs text-slate-600">
                             {finding.explanation} ({finding.detected_by})
                           </p>
+
+                          {/* Suggested KB Article */}
+                          {finding.kb_article ? (
+                            <div className="mt-2 rounded-lg border border-indigo-100 bg-gradient-to-br from-indigo-50/80 via-blue-50/60 to-white p-3 shadow-xs">
+                              <div className="flex items-center justify-between gap-2 mb-1.5">
+                                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-900">
+                                  <BookOpen size={13} className="text-indigo-600" />
+                                  <span>Suggested Knowledge Base Solution</span>
+                                </div>
+                                <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800">
+                                  Article {finding.kb_article.article_number}
+                                </span>
+                              </div>
+
+                              <Link
+                                to={`/article/${finding.kb_article.article_number}`}
+                                className="text-xs font-bold text-indigo-700 hover:text-indigo-900 hover:underline flex items-center gap-1 group"
+                              >
+                                <span>{finding.kb_article.title}</span>
+                                <ArrowUpRight
+                                  size={13}
+                                  className="text-indigo-500 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"
+                                />
+                              </Link>
+
+                              {finding.kb_article.summary && (
+                                <p className="text-xs text-slate-600 line-clamp-2 mt-1 leading-relaxed">
+                                  {finding.kb_article.summary}
+                                </p>
+                              )}
+
+                              <div className="mt-2 pt-1.5 flex items-center justify-between gap-2 border-t border-indigo-100/60">
+                                <span className="text-[10px] text-indigo-600 font-medium">
+                                  {finding.kb_article.relevance_score
+                                    ? `${Math.round(finding.kb_article.relevance_score * 100)}% Match`
+                                    : "Relevant Resolution"}
+                                </span>
+                                <Link
+                                  to={`/article/${finding.kb_article.article_number}`}
+                                >
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-[11px] h-7 px-2.5 text-indigo-700 border-indigo-300 hover:bg-indigo-100 bg-white"
+                                  >
+                                    View Article
+                                  </Button>
+                                </Link>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="pt-1">
+                              <Link
+                                to={`/knowledge-base?search=${encodeURIComponent(
+                                  finding.explanation.slice(0, 60),
+                                )}`}
+                                className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 hover:underline font-medium"
+                              >
+                                <Search size={12} /> Search Knowledge Base for related articles
+                              </Link>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

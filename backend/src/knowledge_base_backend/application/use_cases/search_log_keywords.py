@@ -1,11 +1,11 @@
-"""Read-only, user-directed log keyword search."""
-
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 import re
 from typing import List, Tuple, Optional
 
 from src.knowledge_base_backend.domain.services.hybrid_article_retrieval_service import HybridArticleRetrievalService
+from src.knowledge_base_backend.domain.services.log_date_filter import LogDateFilter
 from src.knowledge_base_backend.domain.services.log_file_validator import LogFileValidator
 from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_dashboard_analysis_service import GroqDashboardAnalysisService
 
@@ -81,7 +81,13 @@ class SearchLogKeywordsUseCase:
         phrase = f"{prefix}\\s+(?:{last})" if prefix else f"(?:{last})"
         return re.compile(rf"(?<!\w){phrase}(?!\w)", re.IGNORECASE)
 
-    async def execute(self, files: List[Tuple[str, bytes]], keywords: List[str]) -> KeywordSearchResult:
+    async def execute(
+        self,
+        files: List[Tuple[str, bytes]],
+        keywords: List[str],
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> KeywordSearchResult:
         normalized = self._normalize_keywords(keywords)
         if not normalized:
             raise ValueError("Select or enter at least one keyword")
@@ -92,6 +98,8 @@ class SearchLogKeywordsUseCase:
             stream = BytesIO(contents)
             self.validator.validate_uploaded_log_file(filename, stream)
             lines = contents.decode("utf-8", errors="replace").splitlines()
+            if date_from or date_to:
+                lines = LogDateFilter.filter_lines(lines, date_from, date_to)
             for index, line in enumerate(lines):
                 for keyword, pattern in patterns:
                     for match in pattern.finditer(line):

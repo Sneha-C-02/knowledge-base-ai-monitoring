@@ -1,6 +1,7 @@
 import asyncio
 import json
 from typing import List, Literal, Optional
+from datetime import datetime
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -56,6 +57,8 @@ async def list_instruments(
 async def analyze_logs_with_dashboard(
     logs: List[UploadFile] = File(...),
     analysis_mode: Literal["exhaustive", "fast"] = Form("exhaustive"),
+    date_from: Optional[str] = Form(None),
+    date_to: Optional[str] = Form(None),
     token: str = Depends(get_current_user_token),
     use_case: AnalyzeLogsWithMemoryUseCase = Depends(Provide[ApplicationContainer.analyze_logs_with_memory_use_case]),
 ):
@@ -67,9 +70,31 @@ async def analyze_logs_with_dashboard(
 
     RE-UPLOAD: The system detects previously-analyzed lines, analyzes ONLY
     new content using the stored context, and updates the memory.
+
+    Optional date_from / date_to (ISO format) to restrict analysis to a time window.
     """
     files = [(log.filename, log.file) for log in logs]
-    result = await use_case.execute(files=files, analysis_mode=analysis_mode)
+
+    # Parse date strings into datetime objects if provided
+    parsed_date_from = None
+    parsed_date_to = None
+    if date_from:
+        try:
+            parsed_date_from = datetime.fromisoformat(date_from)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid date_from format: {date_from}")
+    if date_to:
+        try:
+            parsed_date_to = datetime.fromisoformat(date_to)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid date_to format: {date_to}")
+
+    result = await use_case.execute(
+        files=files,
+        analysis_mode=analysis_mode,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
+    )
 
     return LogDashboardResponse(
         instrument_id=result.instrument_id,
@@ -107,9 +132,12 @@ async def analyze_logs_with_dashboard(
                 severity=f.severity,
                 explanation=f.explanation,
                 detected_by=f.detected_by,
+                kb_article=f.kb_article,
             )
             for f in result.complete_findings
         ],
+        date_from=date_from,
+        date_to=date_to,
     )
 
 
@@ -118,15 +146,35 @@ async def analyze_logs_with_dashboard(
 async def search_log_keywords(
     logs: List[UploadFile] = File(...),
     keywords: List[str] = Form(...),
+    date_from: Optional[str] = Form(None),
+    date_to: Optional[str] = Form(None),
     token: str = Depends(get_current_user_token),
     use_case: SearchLogKeywordsUseCase = Depends(Provide[ApplicationContainer.search_log_keywords_use_case]),
 ):
-    """Read-only search of uploaded logs for explicit user-selected terms."""
+    """Read-only search of uploaded logs for explicit user-selected terms, optionally filtered by date range."""
     if not keywords:
         raise HTTPException(status_code=422, detail="Select or enter at least one keyword")
 
+    parsed_date_from = None
+    parsed_date_to = None
+    if date_from:
+        try:
+            parsed_date_from = datetime.fromisoformat(date_from)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid date_from format: {date_from}")
+    if date_to:
+        try:
+            parsed_date_to = datetime.fromisoformat(date_to)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid date_to format: {date_to}")
+
     files = [(log.filename or "uploaded.log", await log.read()) for log in logs]
-    result = await use_case.execute(files=files, keywords=keywords)
+    result = await use_case.execute(
+        files=files,
+        keywords=keywords,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
+    )
     return KeywordSearchResponse(
         keywords=result.keywords,
         total_matches=len(result.findings),

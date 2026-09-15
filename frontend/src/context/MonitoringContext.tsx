@@ -25,6 +25,10 @@ interface MonitoringContextType {
   refreshKeywordSuggestions: (instrumentId?: number) => Promise<void>;
   analysisMode: AnalysisMode;
   setAnalysisMode: Dispatch<SetStateAction<AnalysisMode>>;
+  dateFrom: string;
+  setDateFrom: Dispatch<SetStateAction<string>>;
+  dateTo: string;
+  setDateTo: Dispatch<SetStateAction<string>>;
   isMonitoring: boolean;
   isKeywordSearching: boolean;
   error: string | null;
@@ -53,6 +57,8 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const [isLoadingKeywordSuggestions, setIsLoadingKeywordSuggestions] =
     useState(false);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("exhaustive");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isKeywordSearching, setIsKeywordSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,11 +112,18 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
       metadata: {
         filenames: files.map((file) => file.name).join(", "),
         analysis_mode: analysisMode,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
       },
     });
 
     try {
-      const dashboardResult = await api.analyzeLogs(files, analysisMode);
+      const dashboardResult = await api.analyzeLogs(
+        files,
+        analysisMode,
+        dateFrom || undefined,
+        dateTo || undefined,
+      );
       setResult(dashboardResult);
       updateStats({
         activeLogs: stats.activeLogs + files.length,
@@ -192,7 +205,14 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     setIsKeywordSearching(true);
     setKeywordResult(null);
     try {
-      setKeywordResult(await api.searchLogKeywords(files, keywords));
+      setKeywordResult(
+        await api.searchLogKeywords(
+          files,
+          keywords,
+          dateFrom || undefined,
+          dateTo || undefined,
+        ),
+      );
     } catch (requestError) {
       console.error(requestError);
       setKeywordError(
@@ -220,6 +240,10 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         refreshKeywordSuggestions,
         analysisMode,
         setAnalysisMode,
+        dateFrom,
+        setDateFrom,
+        dateTo,
+        setDateTo,
         isMonitoring,
         isKeywordSearching,
         error,

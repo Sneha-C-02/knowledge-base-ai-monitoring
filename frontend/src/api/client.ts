@@ -140,12 +140,20 @@ class ApiClient {
   async analyzeLogs(
     files: File[],
     analysisMode: "exhaustive" | "fast" = "exhaustive",
+    dateFrom?: string,
+    dateTo?: string,
   ): Promise<DashboardResult> {
     const formData = new FormData();
     files.forEach((file) => {
       formData.append("logs", file);
     });
     formData.append("analysis_mode", analysisMode);
+    if (dateFrom) {
+      formData.append("date_from", dateFrom);
+    }
+    if (dateTo) {
+      formData.append("date_to", dateTo);
+    }
 
     return this.fetch<DashboardResult>("/monitoring/dashboard/analyze", {
       method: "POST",
@@ -158,10 +166,18 @@ class ApiClient {
   async searchLogKeywords(
     files: File[],
     keywords: string[],
+    dateFrom?: string,
+    dateTo?: string,
   ): Promise<KeywordSearchResult> {
     const formData = new FormData();
     files.forEach((file) => formData.append("logs", file));
     keywords.forEach((keyword) => formData.append("keywords", keyword));
+    if (dateFrom) {
+      formData.append("date_from", dateFrom);
+    }
+    if (dateTo) {
+      formData.append("date_to", dateTo);
+    }
     return this.fetch<KeywordSearchResult>(
       "/monitoring/dashboard/keyword-search",
       {
