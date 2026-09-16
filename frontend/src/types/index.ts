@@ -16,6 +16,7 @@ export interface KBArticle {
 export interface User {
   username: string;
   name: string;
+  group_id: number;
 }
 
 export interface ActivityLog {

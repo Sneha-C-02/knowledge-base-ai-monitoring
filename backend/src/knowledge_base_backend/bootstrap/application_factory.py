@@ -2,6 +2,9 @@ from dependency_injector import providers
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.knowledge_base_backend.configuration.application_settings import settings
+# Load the ORM registry before handling requests so foreign-key targets such as
+# user_groups are present on Base.metadata.
+from src.knowledge_base_backend.infrastructure.database import models as database_models
 from src.knowledge_base_backend.bootstrap.dependency_container import ApplicationContainer
 from src.knowledge_base_backend.presentation.api.middleware.request_identifier_middleware import RequestIdentifierMiddleware
 from src.knowledge_base_backend.presentation.api.middleware.request_logging_middleware import RequestLoggingMiddleware
@@ -12,6 +15,7 @@ from contextlib import asynccontextmanager
 from src.knowledge_base_backend.presentation.api.exception_handlers.application_exception_handlers import add_exception_handlers
 
 from src.knowledge_base_backend.presentation.api.routers import authentication_router
+from src.knowledge_base_backend.presentation.api.routers import user_management_router
 from src.knowledge_base_backend.presentation.api.routers import knowledge_base_router
 from src.knowledge_base_backend.presentation.api.routers import support_router
 from src.knowledge_base_backend.presentation.api.routers import monitoring_router
@@ -70,6 +74,7 @@ def create_application() -> FastAPI:
     
     api_prefix = settings.api_prefix
     app.include_router(authentication_router.router, prefix=api_prefix)
+    app.include_router(user_management_router.router)
     app.include_router(knowledge_base_router.router, prefix=api_prefix)
     app.include_router(support_router.router, prefix=api_prefix)
     app.include_router(monitoring_router.router, prefix=api_prefix)
