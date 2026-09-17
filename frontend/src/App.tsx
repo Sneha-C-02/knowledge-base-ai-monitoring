@@ -9,6 +9,7 @@ import { ActivityPage } from './pages/ActivityPage';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { ArticlePage } from './pages/ArticlePage';
+import UserManagementPage from './pages/UserManagementPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SystemProvider } from './context/SystemContext';
 import { MonitoringProvider } from './context/MonitoringContext';
@@ -26,28 +27,29 @@ function App() {
     <AuthProvider>
       <SystemProvider>
         <MonitoringProvider>
-        <Router>
-          <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          
-          <Route element={
-            <ProtectedRoute>
-              <AppLayout />
-            </ProtectedRoute>
-          }>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/support" element={<SupportPage />} />
-            <Route path="/monitoring" element={<MonitoringPage />} />
-            <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/activity" element={<ActivityPage />} />
-            <Route path="/article/:id" element={<ArticlePage />} />
-          </Route>
+          <Router>
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/login" element={<LoginPage />} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-        </Router>
+              <Route element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }>
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/support" element={<SupportPage />} />
+                <Route path="/monitoring" element={<MonitoringPage />} />
+                <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
+                <Route path="/activity" element={<ActivityPage />} />
+                <Route path="/user-management" element={<UserManagementPage />} />
+                <Route path="/article/:id" element={<ArticlePage />} />
+              </Route>
+
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Router>
         </MonitoringProvider>
       </SystemProvider>
     </AuthProvider>

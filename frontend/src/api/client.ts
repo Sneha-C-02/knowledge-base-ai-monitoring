@@ -1,6 +1,7 @@
 import type {
   KBArticle,
   User,
+  ManagedUser,
   ActivityLog,
   Notification,
   SystemStats,
@@ -74,6 +75,17 @@ class ApiClient {
     return this.fetch<{ token: string; user: User }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
+    });
+  }
+
+  async getManagedUsers(): Promise<ManagedUser[]> {
+    return this.fetch<ManagedUser[]>("/users/management/users");
+  }
+
+  async changeManagedUserGroup(userId: number, groupId: number): Promise<any> {
+    return this.fetch<any>(`/users/management/users/${userId}/group`, {
+      method: "PUT",
+      body: JSON.stringify({ group_id: groupId }),
     });
   }
 

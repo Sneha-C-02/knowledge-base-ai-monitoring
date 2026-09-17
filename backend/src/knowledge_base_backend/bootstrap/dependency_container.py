@@ -2,10 +2,12 @@ from dependency_injector import containers, providers
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.knowledge_base_backend.application.services.continuous_monitoring_service import ContinuousMonitoringService
+from src.knowledge_base_backend.application.services.authorization_service import AuthorizationService
 from src.knowledge_base_backend.application.services.keyword_learning_coordinator import KeywordLearningCoordinator
 from src.knowledge_base_backend.application.use_cases.analyze_logs_with_memory import AnalyzeLogsWithMemoryUseCase
 from src.knowledge_base_backend.application.use_cases.analyze_uploaded_logs import AnalyzeUploadedLogsUseCase
 from src.knowledge_base_backend.application.use_cases.authenticate_user import AuthenticateUserUseCase
+from src.knowledge_base_backend.application.use_cases.register_user import RegisterUserUseCase
 from src.knowledge_base_backend.application.use_cases.create_activity import CreateActivityUseCase
 from src.knowledge_base_backend.application.use_cases.get_dashboard_statistics import GetDashboardStatisticsUseCase
 from src.knowledge_base_backend.application.use_cases.get_knowledge_base_article import GetKnowledgeBaseArticleUseCase
@@ -52,6 +54,7 @@ from src.knowledge_base_backend.infrastructure.artificial_intelligence.secure_gr
 from src.knowledge_base_backend.infrastructure.authentication.argon2_password_hashing_service import (
     Argon2PasswordHashingService,
 )
+from src.knowledge_base_backend.domain.services.password_validator import PasswordValidator
 from src.knowledge_base_backend.infrastructure.authentication.jwt_authentication_token_service import (
     JwtAuthenticationTokenService,
 )
@@ -92,6 +95,9 @@ from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_
 from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_user_repository import (
     SqlAlchemyUserRepository,
 )
+from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_permission_repository import (
+    SqlAlchemyPermissionRepository,
+)
 from src.knowledge_base_backend.infrastructure.database.session_context import get_current_session
 from src.knowledge_base_backend.infrastructure.database.table_schema_ensurer import TableSchemaEnsurer
 from src.knowledge_base_backend.infrastructure.events.event_bus import EventBus
@@ -130,6 +136,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
     article_vector_repository = providers.Factory(SqlAlchemyArticleVectorSearchRepository, session=db_session)
     instrument_repository = providers.Factory(SqlAlchemyInstrumentRepository, session=db_session)
     user_repository = providers.Factory(SqlAlchemyUserRepository, session=db_session)
+    permission_repository = providers.Factory(SqlAlchemyPermissionRepository,session=db_session)
+    authorization_service = providers.Factory(AuthorizationService, permission_repository=permission_repository)
     activity_repository = providers.Factory(SqlAlchemyActivityRepository, session=db_session)
     notification_repository = providers.Factory(SqlAlchemyNotificationRepository, session=db_session)
     monitoring_repository = providers.Factory(SqlAlchemyMonitoringRepository, session=db_session)
@@ -149,6 +157,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     # Core Services
     date_time_provider = providers.Singleton(UtcDateTimeProvider)
     password_hashing_service = providers.Singleton(Argon2PasswordHashingService)
+    password_validator = providers.Singleton(PasswordValidator)
     token_service = providers.Singleton(JwtAuthenticationTokenService)
     event_bus = providers.Singleton(EventBus)
 
@@ -271,6 +280,16 @@ class ApplicationContainer(containers.DeclarativeContainer):
         AuthenticateUserUseCase,
         user_repository=user_repository,
         password_hashing_service=password_hashing_service,
+        token_service=token_service,
+        activity_repository=activity_repository,
+        date_time_provider=date_time_provider,
+    )
+
+    register_user_use_case = providers.Factory(
+        RegisterUserUseCase,
+        user_repository=user_repository,
+        password_hashing_service=password_hashing_service,
+        password_validator=password_validator,
         token_service=token_service,
         activity_repository=activity_repository,
         date_time_provider=date_time_provider,

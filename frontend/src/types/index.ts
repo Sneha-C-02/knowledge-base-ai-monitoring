@@ -19,6 +19,13 @@ export interface User {
   group_id: number;
 }
 
+export interface ManagedUser {
+  id: number;
+  username: string;
+  display_name: string;
+  group_id: number | null;
+}
+
 export interface ActivityLog {
   id: string;
   type: string;

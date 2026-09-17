@@ -74,7 +74,7 @@ def create_application() -> FastAPI:
     
     api_prefix = settings.api_prefix
     app.include_router(authentication_router.router, prefix=api_prefix)
-    app.include_router(user_management_router.router)
+    app.include_router(user_management_router.router, prefix=api_prefix)
     app.include_router(knowledge_base_router.router, prefix=api_prefix)
     app.include_router(support_router.router, prefix=api_prefix)
     app.include_router(monitoring_router.router, prefix=api_prefix)
