@@ -10,7 +10,19 @@ import type {
   InstrumentMemoryResponse,
   KeywordSearchResult,
   KeywordSuggestionsResult,
+  IncidentInvestigationResponse,
+  KbSolutionResponse,
+  SupportFeedbackRequest,
+  SupportFeedbackResponse,
+  FindingKbSearchRequest,
+  FindingKbSearchResponse,
+  DiscoverKeywordsResponse,
+  AcceptKeywordRequest,
+  AcceptedKeyword,
+  AcceptedKeywordsListResponse,
+  RejectKeywordRequest,
 } from "../types";
+
 
 // Use environment variable for API URL or fallback to localhost
 const API_BASE_URL =
@@ -56,7 +68,18 @@ class ApiClient {
         }
 
         const errorText = await response.text();
-        throw new Error(`API Error: ${response.status} - ${errorText}`);
+        let message = `API Error: ${response.status} - ${errorText}`;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed?.error?.message) {
+            message = parsed.error.message;
+          } else if (parsed?.detail) {
+            message = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+          }
+        } catch {
+          // ignore json parse error
+        }
+        throw new Error(message);
       }
 
       return response.json();
@@ -95,7 +118,8 @@ class ApiClient {
   }
 
   // --- Support ---
-  async querySupport(query: string): Promise<{
+  /** Legacy support query - reactive support requires log files */
+  async querySupport(_query: string): Promise<{
     answer: string;
     related_articles?: {
       article_number: string;
@@ -106,19 +130,83 @@ class ApiClient {
       relevance_score: number;
     }[];
   }> {
-    return this.fetch<{
-      answer: string;
-      related_articles?: {
-        article_number: string;
-        title: string;
-        article_url: string;
-        snippet: string;
-        retrieval_reason: string;
-        relevance_score: number;
-      }[];
-    }>("/support/query", {
+    throw new Error(
+      "No log files or folder uploaded. Reactive support chat requires at least one log file or folder to investigate.",
+    );
+  }
+
+  /** Ask a reactive support question to get grounded KB answers - requires log files */
+  async submitSupportQuery(_query: string): Promise<{
+    answer: string;
+    related_articles?: {
+      article_number: string;
+      title: string;
+      article_url: string;
+      snippet: string;
+      retrieval_reason: string;
+      relevance_score: number;
+    }[];
+  }> {
+    throw new Error(
+      "No log files or folder uploaded. Reactive support chat requires at least one log file or folder to investigate.",
+    );
+  }
+
+  /** Reactive support incident investigation over multi-file/folder logs */
+  async investigateIncident(
+    files: File[],
+    problemDescription: string,
+  ): Promise<IncidentInvestigationResponse> {
+    if (
+      !files ||
+      files.length === 0 ||
+      files.every((f) => !f.name || !f.name.trim() || f.size === 0)
+    ) {
+      throw new Error(
+        "No log files or folder uploaded. At least one non-empty log file or folder is required for incident investigation.",
+      );
+    }
+    const formData = new FormData();
+    files.forEach((file) => {
+      const path = (file as any).webkitRelativePath || file.name;
+      formData.append("logs", file, path);
+    });
+    formData.append("problem_description", problemDescription);
+
+    return this.fetch<IncidentInvestigationResponse>("/support/investigate", {
       method: "POST",
-      body: JSON.stringify({ query }),
+      body: formData,
+      isFileUpload: true,
+    });
+  }
+
+  /** Search KB articles and generate solution for an investigated incident (Called ONLY on user button click) */
+  async searchKbSolution(
+    query: string,
+    matchedLogFile?: string,
+    lineNumber?: number,
+    incidentPattern?: string,
+    instrumentName?: string,
+  ): Promise<KbSolutionResponse> {
+    return this.fetch<KbSolutionResponse>("/support/kb-solution", {
+      method: "POST",
+      body: JSON.stringify({
+        query,
+        matched_log_file: matchedLogFile,
+        line_number: lineNumber,
+        incident_pattern: incidentPattern,
+        instrument_name: instrumentName,
+      }),
+    });
+  }
+
+  /** Record user verification feedback (correct/wrong) to improve newer searches */
+  async submitSupportFeedback(
+    feedback: SupportFeedbackRequest,
+  ): Promise<SupportFeedbackResponse> {
+    return this.fetch<SupportFeedbackResponse>("/support/feedback", {
+      method: "POST",
+      body: JSON.stringify(feedback),
     });
   }
 
@@ -239,6 +327,80 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  // --- On-Demand Finding KB Search ---
+  async searchFindingKb(
+    req: FindingKbSearchRequest,
+  ): Promise<FindingKbSearchResponse> {
+    return this.fetch<FindingKbSearchResponse>(
+      "/monitoring/dashboard/search-finding-kb",
+      {
+        method: "POST",
+        body: JSON.stringify(req),
+      },
+    );
+  }
+
+  // --- Keyword Discovery & Human Acceptance ---
+  async discoverFailureKeywords(
+    files: File[],
+  ): Promise<DiscoverKeywordsResponse> {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    return this.fetch<DiscoverKeywordsResponse>(
+      "/monitoring/dashboard/keywords/discover",
+      {
+        method: "POST",
+        body: formData,
+        isFileUpload: true,
+      },
+    );
+  }
+
+  async acceptDiscoveredKeyword(
+    req: AcceptKeywordRequest,
+  ): Promise<AcceptedKeyword> {
+    return this.fetch<AcceptedKeyword>("/monitoring/dashboard/keywords/accept", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async rejectDiscoveredKeyword(
+    req: RejectKeywordRequest,
+  ): Promise<{ status: string; keyword: string }> {
+    return this.fetch<{ status: string; keyword: string }>(
+      "/monitoring/dashboard/keywords/reject",
+      {
+        method: "POST",
+        body: JSON.stringify(req),
+      },
+    );
+  }
+
+  async listAcceptedKeywords(
+    instrumentId?: number,
+  ): Promise<AcceptedKeywordsListResponse> {
+    const query = instrumentId ? `?instrument_id=${instrumentId}` : "";
+    return this.fetch<AcceptedKeywordsListResponse>(
+      `/monitoring/dashboard/keywords/accepted${query}`,
+    );
+  }
+
+  async deleteAcceptedKeyword(
+    keywordId: number,
+  ): Promise<{ status: string; id: number }> {
+    return this.fetch<{ status: string; id: number }>(
+      `/monitoring/dashboard/keywords/accepted/${keywordId}`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
 
   // --- System ---
   async getActivities(): Promise<ActivityLog[]> {

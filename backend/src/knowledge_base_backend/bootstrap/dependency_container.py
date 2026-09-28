@@ -7,6 +7,10 @@ from src.knowledge_base_backend.application.use_cases.analyze_logs_with_memory i
 from src.knowledge_base_backend.application.use_cases.analyze_uploaded_logs import AnalyzeUploadedLogsUseCase
 from src.knowledge_base_backend.application.use_cases.authenticate_user import AuthenticateUserUseCase
 from src.knowledge_base_backend.application.use_cases.create_activity import CreateActivityUseCase
+from src.knowledge_base_backend.application.use_cases.discover_failure_keywords import (
+    DiscoverFailureKeywordsUseCase,
+)
+
 from src.knowledge_base_backend.application.use_cases.get_dashboard_statistics import GetDashboardStatisticsUseCase
 from src.knowledge_base_backend.application.use_cases.get_knowledge_base_article import GetKnowledgeBaseArticleUseCase
 from src.knowledge_base_backend.application.use_cases.get_learned_keyword_suggestions import (
@@ -19,6 +23,13 @@ from src.knowledge_base_backend.application.use_cases.list_knowledge_base_articl
 from src.knowledge_base_backend.application.use_cases.list_notifications import ListNotificationsUseCase
 from src.knowledge_base_backend.application.use_cases.search_log_keywords import SearchLogKeywordsUseCase
 from src.knowledge_base_backend.application.use_cases.submit_support_query import SubmitSupportQueryUseCase
+from src.knowledge_base_backend.application.use_cases.investigate_log_incident import InvestigateLogIncidentUseCase
+from src.knowledge_base_backend.application.use_cases.search_kb_for_incident import SearchKbForIncidentUseCase
+from src.knowledge_base_backend.application.use_cases.submit_support_feedback import SubmitSupportFeedbackUseCase
+from src.knowledge_base_backend.domain.services.log_incident_investigation_service import LogIncidentInvestigationService
+from src.knowledge_base_backend.infrastructure.database.repositories.sqlalchemy_support_feedback_repository import (
+    SqlAlchemySupportFeedbackRepository,
+)
 from src.knowledge_base_backend.configuration.application_settings import settings
 from src.knowledge_base_backend.domain.services.log_keyword_extractor import LogKeywordExtractor
 from src.knowledge_base_backend.domain.services.log_keyword_learning_service import LogKeywordLearningService
@@ -144,6 +155,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
     table_schema_ensurer = providers.Singleton(TableSchemaEnsurer)
     learned_keyword_repository = providers.Factory(
         SqlAlchemyLearnedKeywordRepository, session=db_session, schema_ensurer=table_schema_ensurer
+    )
+    support_feedback_repository = providers.Factory(
+        SqlAlchemySupportFeedbackRepository, session=db_session, schema_ensurer=table_schema_ensurer
     )
 
     # Core Services
@@ -292,6 +306,32 @@ class ApplicationContainer(containers.DeclarativeContainer):
         instrument_recognition=instrument_recognition_service,
     )
 
+    log_incident_investigation_service = providers.Singleton(
+        LogIncidentInvestigationService,
+        ai_answer_service=answer_generation_service,
+    )
+
+    investigate_log_incident_use_case = providers.Factory(
+        InvestigateLogIncidentUseCase,
+        investigation_service=log_incident_investigation_service,
+        feedback_repository=support_feedback_repository,
+    )
+
+    search_kb_for_incident_use_case = providers.Factory(
+        SearchKbForIncidentUseCase,
+        retrieval_service=hybrid_retrieval_service,
+        answer_generator=answer_generation_service,
+        context_builder=grounding_context_builder,
+        instrument_recognition=instrument_recognition_service,
+        feedback_repository=support_feedback_repository,
+    )
+
+    submit_support_feedback_use_case = providers.Factory(
+        SubmitSupportFeedbackUseCase,
+        feedback_repository=support_feedback_repository,
+        keyword_learning_coordinator=keyword_learning_coordinator,
+    )
+
     analyze_uploaded_logs_use_case = providers.Factory(
         AnalyzeUploadedLogsUseCase,
         validator=log_validator,
@@ -330,6 +370,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
         GetLearnedKeywordSuggestionsUseCase,
         learned_keyword_repository=learned_keyword_repository,
     )
+
+    discover_failure_keywords_use_case = providers.Factory(
+        DiscoverFailureKeywordsUseCase,
+        learned_keyword_repository=learned_keyword_repository,
+    )
+
 
     get_dashboard_statistics_use_case = providers.Factory(
         GetDashboardStatisticsUseCase,

@@ -18,7 +18,11 @@ CREATE TABLE IF NOT EXISTS learned_keywords (
     severity VARCHAR(16) NOT NULL DEFAULT 'warning',
     occurrence_count INTEGER NOT NULL DEFAULT 1,
     first_seen_at TIMESTAMPTZ NOT NULL,
-    last_seen_at TIMESTAMPTZ NOT NULL
+    last_seen_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'accepted',
+    failure_indicator TEXT,
+    sample_line TEXT,
+    notes TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_learned_keywords_instrument_keyword

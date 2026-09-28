@@ -75,6 +75,15 @@ export interface DashboardBullet {
   pattern_name?: string;
 }
 
+export interface MatchingMajorEvent {
+  timestamp: string;
+  event_type: string;
+  description: string;
+  match_reason: string;
+  line_number: number;
+  log_file: string;
+}
+
 export interface DashboardFinding {
   filename: string;
   line_number: number;
@@ -83,7 +92,22 @@ export interface DashboardFinding {
   explanation: string;
   detected_by: string;
   kb_article?: KeywordArticle | null;
+  simple_summary?: string;
+  pre_incident_summary?: string;
+  pre_incident_pattern?: string;
+  pre_incident_events?: {
+    line: number;
+    timestamp?: string;
+    snippet: string;
+    type?: string;
+  }[];
+  major_events?: MatchingMajorEvent[];
+  system_changes?: SystemChangeComparison[];
+  grounding_citations?: GroundingEvidence[];
+  confidence_score?: number;
+  suggested_search_query?: string;
 }
+
 
 export interface KeywordArticle {
   id?: string;
@@ -171,3 +195,159 @@ export interface InstrumentMemoryResponse {
   total_analyses: number;
   history: InstrumentMemoryEntry[];
 }
+
+// --- Redesigned Reactive Support Types ---
+
+export interface MatchingMajorEvent {
+  timestamp: string;
+  event_type: string;
+  description: string;
+  match_reason: string;
+  line_number: number;
+  log_file: string;
+}
+
+export interface SystemChangeComparison {
+  aspect: string;
+  before_incident: string;
+  after_incident: string;
+  change_summary: string;
+}
+
+export interface GroundingEvidence {
+  log_file: string;
+  line_number: number;
+  snippet: string;
+  relevance_reason: string;
+}
+
+export interface IncidentInvestigationResponse {
+  found: boolean;
+  problem_description: string;
+  log_file?: string | null;
+  line_number?: number | null;
+  matched_line?: string | null;
+  matched_timestamp?: string | null;
+  severity?: string | null;
+  pre_incident_summary: string;
+  pre_incident_pattern: string;
+  pre_incident_events: {
+    line: number;
+    timestamp?: string;
+    snippet: string;
+    type?: string;
+  }[];
+  major_events: {
+    timestamp: string;
+    event_type: string;
+    description: string;
+    match_reason: string;
+    line_number: number;
+    log_file: string;
+  }[];
+  system_changes: SystemChangeComparison[];
+  grounding_citations: GroundingEvidence[];
+  confidence_score: number;
+  suggested_search_query: string;
+  anti_hallucination_verified: boolean;
+  files_scanned: number;
+  lines_scanned: number;
+}
+
+export interface RelatedArticle {
+  article_number: string;
+  title: string;
+  article_url: string;
+  snippet: string;
+  retrieval_reason: string;
+  relevance_score: number;
+}
+
+export interface KbSolutionResponse {
+  answer: string;
+  related_articles: RelatedArticle[];
+}
+
+export interface SupportFeedbackRequest {
+  problem_description: string;
+  is_correct: boolean;
+  log_file?: string;
+  line_number?: number;
+  detected_pattern?: string;
+  feedback_notes?: string;
+}
+
+export interface SupportFeedbackResponse {
+  status: string;
+  message: string;
+  feedback_id: number;
+  is_correct: boolean;
+  created_at?: string;
+}
+
+export interface FindingKbSearchRequest {
+  snippet: string;
+  explanation?: string;
+  filename?: string;
+  line_number?: number;
+  search_query?: string;
+  instrument_name?: string;
+}
+
+export interface FindingKbSearchResponse {
+  kb_article?: KeywordArticle | null;
+  search_query: string;
+  found: boolean;
+}
+
+export interface DiscoveredKeyword {
+  keyword: string;
+  severity: string;
+  failure_indicator: string;
+  occurrence_count: number;
+  sample_line: string;
+  sample_line_number: number;
+  sample_file: string;
+  confidence_score: number;
+}
+
+export interface DiscoverKeywordsResponse {
+  keywords: DiscoveredKeyword[];
+  total_discovered: number;
+  files_scanned: number;
+}
+
+export interface AcceptKeywordRequest {
+  keyword: string;
+  severity?: string;
+  failure_indicator?: string;
+  sample_line?: string;
+  notes?: string;
+  instrument_id?: number;
+}
+
+export interface RejectKeywordRequest {
+  keyword: string;
+  reason?: string;
+}
+
+export interface AcceptedKeyword {
+  id: number;
+  instrument_id: number;
+  keyword: string;
+  severity: string;
+  occurrence_count: number;
+  failure_indicator?: string;
+  sample_line?: string;
+  notes?: string;
+  status: string;
+  first_seen_at?: string;
+  last_seen_at?: string;
+}
+
+export interface AcceptedKeywordsListResponse {
+  keywords: AcceptedKeyword[];
+  total: number;
+}
+
+

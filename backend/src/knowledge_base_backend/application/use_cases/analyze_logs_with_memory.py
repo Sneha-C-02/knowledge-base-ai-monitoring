@@ -20,14 +20,17 @@ from src.knowledge_base_backend.domain.services.date_time_provider import DateTi
 from src.knowledge_base_backend.domain.services.log_file_validator import LogFileValidator
 from src.knowledge_base_backend.domain.services.persistent_file_storage import PersistentFileStorage
 from src.knowledge_base_backend.domain.value_objects.log_dashboard_result import (
+    DashboardFinding,
     DashboardSummaryBullet,
     LogDashboardResult,
 )
 from src.knowledge_base_backend.domain.services.log_date_filter import LogDateFilter
 from src.knowledge_base_backend.domain.services.hybrid_article_retrieval_service import HybridArticleRetrievalService
+from src.knowledge_base_backend.domain.services.log_incident_investigation_service import LogIncidentInvestigationService
 from src.knowledge_base_backend.infrastructure.artificial_intelligence.groq_dashboard_analysis_service import (
     GroqDashboardAnalysisService,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -227,9 +230,10 @@ class AnalyzeLogsWithMemoryUseCase:
             elif result.overall_status == "WARNING" and aggregated_result.overall_status != "CRITICAL":
                 aggregated_result.overall_status = "WARNING"
 
-        # --- Step 5: Enrich findings with KB articles ---
-        if self.retrieval_service:
-            await self._attach_kb_articles(aggregated_result, instrument.name)
+        # --- Step 5: Ensure KB articles are NOT auto-fetched in advance (on-demand only) ---
+        for finding in aggregated_result.complete_findings:
+            finding.kb_article = None
+
 
         # --- Step 6: Create dashboard notification ---
         await self._create_dashboard_notification(aggregated_result)
@@ -243,7 +247,7 @@ class AnalyzeLogsWithMemoryUseCase:
         instrument_id: int,
         instrument_name: str,
         memory_entries: list,
-        analysis_mode: str,
+        analysis_mode: str = "exhaustive",
         date_from: Optional[dt] = None,
         date_to: Optional[dt] = None,
     ) -> LogDashboardResult:
@@ -357,6 +361,10 @@ class AnalyzeLogsWithMemoryUseCase:
                     analysis_mode=analysis_mode,
                 )
 
+                # Offset line numbers of incremental findings to match the full file position
+                for finding in result.complete_findings:
+                    finding.line_number += previously_analyzed
+
                 # Update the context summary to include new content
                 updated_summary = await self.ai_service.generate_context_summary(
                     log_content=new_content,
@@ -391,7 +399,11 @@ class AnalyzeLogsWithMemoryUseCase:
         )
         await self.memory_repository.save_memory_entry(memory_entry)
 
+        # Enrich findings with deep forensic features and plain-English simple AI explanation
+        self._enrich_findings_with_forensics(result.complete_findings, all_lines, filename)
+
         return result
+
 
     async def _create_dashboard_notification(self, result: LogDashboardResult) -> None:
         """Create a system notification with the formatted dashboard content."""
@@ -462,3 +474,143 @@ class AnalyzeLogsWithMemoryUseCase:
             except Exception:
                 logger.debug("KB article lookup failed for finding line %d", finding.line_number)
                 finding.kb_article = None
+
+    def _enrich_findings_with_forensics(
+        self, findings: List[DashboardFinding], all_lines: List[str], filename: str
+    ) -> None:
+        """Enrich detected findings with deep forensic context and simple plain-English AI explanations."""
+        investigation_service = LogIncidentInvestigationService()
+        for finding in findings:
+            finding.kb_article = None  # KB search is strictly on-demand
+            target_line = finding.line_number
+            target_idx = max(0, min(len(all_lines) - 1, target_line - 1))
+
+            # 1. Simple AI plain-language summary
+            finding.simple_summary = self._generate_simple_ai_summary(finding.snippet, finding.severity)
+
+            # 2. Pre-incident events window (up to 35 lines)
+            pre_start = max(0, target_idx - 35)
+            pre_lines = all_lines[pre_start:target_idx]
+            pre_records = [
+                {
+                    "file": filename,
+                    "line": pre_start + i + 1,
+                    "text": line.strip(),
+                    "lower": line.strip().lower(),
+                    "timestamp": investigation_service.detect_timestamp(line),
+                    "severity": investigation_service.detect_severity(line),
+                }
+                for i, line in enumerate(pre_lines)
+                if line.strip()
+            ]
+
+            incident_record = {
+                "file": filename,
+                "line": target_line,
+                "text": finding.snippet,
+                "lower": finding.snippet.lower(),
+                "timestamp": investigation_service.detect_timestamp(finding.snippet),
+                "severity": finding.severity.upper() if finding.severity else "ERROR",
+            }
+
+            post_end = min(len(all_lines), target_idx + 26)
+            post_lines = all_lines[target_idx + 1:post_end]
+            post_records = [
+                {
+                    "file": filename,
+                    "line": target_idx + 1 + i + 1,
+                    "text": line.strip(),
+                    "lower": line.strip().lower(),
+                    "timestamp": investigation_service.detect_timestamp(line),
+                    "severity": investigation_service.detect_severity(line),
+                }
+                for i, line in enumerate(post_lines)
+                if line.strip()
+            ]
+
+            pattern_name, pre_summary, pre_events = investigation_service._analyze_pre_incident(
+                pre_records, incident_record, finding.explanation or finding.snippet
+            )
+            finding.pre_incident_pattern = pattern_name
+            finding.pre_incident_summary = pre_summary
+            finding.pre_incident_events = pre_events
+
+            parsed_files = {filename: pre_records + [incident_record] + post_records}
+            major_events = investigation_service._detect_matching_major_events(
+                parsed_files, incident_record, finding.explanation or finding.snippet
+            )
+            finding.major_events = [
+                {
+                    "timestamp": ev.timestamp,
+                    "event_type": ev.event_type,
+                    "description": ev.description,
+                    "match_reason": ev.match_reason,
+                    "line_number": ev.line_number,
+                    "log_file": ev.log_file,
+                }
+                for ev in major_events
+            ]
+
+            system_changes = investigation_service._analyze_system_changes(
+                pre_records, incident_record, post_records
+            )
+            finding.system_changes = [
+                {
+                    "aspect": sc.aspect,
+                    "before_incident": sc.before_incident,
+                    "after_incident": sc.after_incident,
+                    "change_summary": sc.change_summary,
+                }
+                for sc in system_changes
+            ]
+
+            problem_keywords = investigation_service.extract_keywords(finding.explanation or finding.snippet)
+            citations, score = investigation_service._validate_grounding(
+                filename, target_line, finding.snippet, pre_records, major_events, problem_keywords
+            )
+            finding.grounding_citations = [
+                {
+                    "log_file": c.log_file,
+                    "line_number": c.line_number,
+                    "snippet": c.snippet,
+                    "relevance_reason": c.relevance_reason,
+                }
+                for c in citations
+            ]
+            finding.confidence_score = score
+            finding.suggested_search_query = investigation_service._generate_suggested_kb_query(
+                finding.explanation or finding.snippet, incident_record, pattern_name
+            )
+
+    @staticmethod
+    def _generate_simple_ai_summary(snippet: str, severity: str) -> str:
+        lower = snippet.lower()
+        if any(k in lower for k in ("comm", "socket", "disconnect", "timeout", "packet", "handshake", "unreachable")):
+            return "The system experienced a network or communication timeout while communicating with the instrument controller or module."
+        if "pressure" in lower and any(k in lower for k in ("exceed", "high", "limit", "max")):
+            return "The fluid pump pressure exceeded the safe operating limit, halting fluid flow to prevent column or tubing damage."
+        if any(k in lower for k in ("leak", "pressure drop", "loss of pressure", "seal")):
+            return "A fluid leak or sudden loss of mobile phase pressure was detected in the fluidic system."
+        if "vacuum" in lower:
+            return "The mass spectrometer vacuum level degraded or the vacuum pump encountered an operational fault."
+        if any(k in lower for k in ("needle", "vial", "autosampler", "carousel", "tray", "pierce", "motor stall")):
+            return "The autosampler mechanism encountered a mechanical obstruction or trouble accessing the sample vial."
+        if "lamp" in lower:
+            return "The detector UV/Vis lamp failed to ignite or its light intensity dropped below the operating threshold."
+        if any(k in lower for k in ("temp", "heater", "cooler", "thermal")):
+            return "The temperature control system failed to maintain the required heating or cooling target."
+        if any(k in lower for k in ("write", "cannot set", "unable to set")):
+            return "The system failed to write a hardware configuration setting or register value to the instrument."
+        if "riostatus" in lower:
+            return "The low-level FPGA/RIO hardware controller reported a hardware bus error."
+        if any(k in lower for k in ("memory", "buffer", "overflow", "oom")):
+            return "The acquisition software ran out of buffer memory to process incoming instrument data."
+        if any(k in lower for k in ("interlock", "emergency stop", "safety")):
+            return "A hardware safety interlock tripped or an emergency stop was triggered to protect the instrument."
+        if any(k in lower for k in ("abort", "crash", "panic", "fatal")):
+            return "The sample acquisition was aborted due to an unrecoverable system exception."
+
+        clean = re.sub(r"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[^:]+:\s*(\[[^\]]+\]\s*)?", "", snippet).strip()
+        clean = re.sub(r"^\(\w+\):\s*", "", clean).strip()
+        return f"Operational anomaly observed: {clean[:140]}"
+

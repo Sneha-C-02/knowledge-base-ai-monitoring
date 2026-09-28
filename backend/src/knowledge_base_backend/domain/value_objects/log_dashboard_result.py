@@ -13,7 +13,7 @@ class DashboardSummaryBullet:
 
 @dataclass
 class DashboardFinding:
-    """An individual issue visible in a complete log analysis."""
+    """An individual issue visible in a complete log analysis with deep forensic details."""
     filename: str
     line_number: int
     snippet: str
@@ -21,6 +21,15 @@ class DashboardFinding:
     explanation: str
     detected_by: str = "rule"
     kb_article: Optional[dict] = None
+    simple_summary: Optional[str] = None
+    pre_incident_summary: Optional[str] = None
+    pre_incident_pattern: Optional[str] = None
+    pre_incident_events: Optional[List[dict]] = None
+    major_events: Optional[List[dict]] = None
+    system_changes: Optional[List[dict]] = None
+    grounding_citations: Optional[List[dict]] = None
+    confidence_score: Optional[float] = None
+    suggested_search_query: Optional[str] = None
 
 
 @dataclass

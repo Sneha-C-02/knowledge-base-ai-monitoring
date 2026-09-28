@@ -1,4 +1,6 @@
 from fastapi import Request, FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from src.knowledge_base_backend.domain.exceptions.authentication_exceptions import AuthenticationError
 from src.knowledge_base_backend.domain.exceptions.article_exceptions import ArticleNotFoundError
@@ -47,6 +49,24 @@ def add_exception_handlers(app: FastAPI) -> None:
                     "message": str(exc),
                     "request_identifier": getattr(request.state, "request_id", "unknown"),
                     "details": None
+                }
+            }
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+        errors = exc.errors()
+        message = "; ".join(f"{'.'.join(str(loc) for loc in err.get('loc', []))}: {err.get('msg', 'Validation error')}" for err in errors)
+        if any("logs" in str(err.get("loc", [])) for err in errors):
+            message = "No log files or folder uploaded. At least one log file or folder is required for incident investigation."
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": message,
+                    "request_identifier": getattr(request.state, "request_id", "unknown"),
+                    "details": jsonable_encoder(errors)
                 }
             }
         )

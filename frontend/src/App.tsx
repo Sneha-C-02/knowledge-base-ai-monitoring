@@ -3,6 +3,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { SupportPage } from './pages/SupportPage';
 import { MonitoringPage } from './pages/MonitoringPage';
+import { KeywordDiscoveryPage } from './pages/KeywordDiscoveryPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { ActivityPage } from './pages/ActivityPage';
@@ -12,6 +13,7 @@ import { ArticlePage } from './pages/ArticlePage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SystemProvider } from './context/SystemContext';
 import { MonitoringProvider } from './context/MonitoringContext';
+import { SupportProvider } from './context/SupportContext';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -26,28 +28,31 @@ function App() {
     <AuthProvider>
       <SystemProvider>
         <MonitoringProvider>
-        <Router>
-          <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          
-          <Route element={
-            <ProtectedRoute>
-              <AppLayout />
-            </ProtectedRoute>
-          }>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/support" element={<SupportPage />} />
-            <Route path="/monitoring" element={<MonitoringPage />} />
-            <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/activity" element={<ActivityPage />} />
-            <Route path="/article/:id" element={<ArticlePage />} />
-          </Route>
+          <SupportProvider>
+            <Router>
+              <Routes>
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                
+                <Route element={
+                  <ProtectedRoute>
+                    <AppLayout />
+                  </ProtectedRoute>
+                }>
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/support" element={<SupportPage />} />
+                  <Route path="/monitoring" element={<MonitoringPage />} />
+                  <Route path="/keyword-discovery" element={<KeywordDiscoveryPage />} />
+                  <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
+                  <Route path="/notifications" element={<NotificationsPage />} />
+                  <Route path="/activity" element={<ActivityPage />} />
+                  <Route path="/article/:id" element={<ArticlePage />} />
+                </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-        </Router>
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Router>
+          </SupportProvider>
         </MonitoringProvider>
       </SystemProvider>
     </AuthProvider>

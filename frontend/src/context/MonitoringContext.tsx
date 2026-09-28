@@ -1,8 +1,9 @@
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { api } from "../api/client";
 import type {
   DashboardResult,
+  InstrumentMemoryResponse,
   KeywordSearchResult,
   KeywordSuggestion,
 } from "../types";
@@ -33,12 +34,24 @@ interface MonitoringContextType {
   isKeywordSearching: boolean;
   error: string | null;
   keywordError: string | null;
+  isLive: boolean;
+  isContinuousMonitoringActive: boolean;
+  startContinuousMonitoring: (instrumentId?: number) => void;
+  stopContinuousMonitoring: () => void;
+  memory: InstrumentMemoryResponse | null;
+  setMemory: Dispatch<SetStateAction<InstrumentMemoryResponse | null>>;
+  showMemory: boolean;
+  setShowMemory: Dispatch<SetStateAction<boolean>>;
+  isLoadingMemory: boolean;
+  fetchMemory: (instrumentId?: number) => Promise<void>;
+  toggleMemoryView: () => Promise<void>;
   resetAnalysisResults: () => void;
   clearKeywordResult: () => void;
   addKeywords: (value: string) => void;
   runCompleteAnalysis: () => Promise<void>;
   runKeywordSearch: () => Promise<void>;
 }
+
 
 const MonitoringContext = createContext<MonitoringContextType | undefined>(
   undefined,
@@ -63,17 +76,171 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const [isKeywordSearching, setIsKeywordSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [keywordError, setKeywordError] = useState<string | null>(null);
+
+  // Continuous monitoring and memory state preserved across routes
+  const [isLive, setIsLive] = useState(false);
+  const [isContinuousMonitoringActive, setIsContinuousMonitoringActive] = useState(false);
+  const [memory, setMemory] = useState<InstrumentMemoryResponse | null>(null);
+  const [showMemory, setShowMemory] = useState(false);
+  const [isLoadingMemory, setIsLoadingMemory] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
   const { addActivity, addNotification, updateStats, stats } = useSystem();
 
   const validFiles = () =>
     logFiles.filter((file): file is File => file !== null);
 
+  const stopContinuousMonitoring = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setIsLive(false);
+    setIsContinuousMonitoringActive(false);
+  }, []);
+
+  const startContinuousMonitoring = useCallback(
+    (instrumentId?: number) => {
+      const targetId = instrumentId || result?.instrument_id;
+      if (!targetId) return;
+
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+
+      setIsContinuousMonitoringActive(true);
+      setIsLive(true);
+      const es = api.streamDashboard(targetId);
+      eventSourceRef.current = es;
+
+      es.onopen = () => {
+        setIsLive(true);
+      };
+
+      es.onmessage = (event) => {
+        try {
+          const data: DashboardResult = JSON.parse(event.data);
+          setResult((prev) => {
+            if (!prev) return data;
+            const existingKeys = new Set(
+              (prev.complete_findings || []).map(
+                (f) => `${f.filename}-${f.line_number}-${f.snippet}`,
+              ),
+            );
+            const newFindings = (data.complete_findings || []).filter(
+              (f) =>
+                !existingKeys.has(`${f.filename}-${f.line_number}-${f.snippet}`),
+            );
+            const mergedFindings = [
+              ...(prev.complete_findings || []),
+              ...newFindings,
+            ];
+
+            const existingBullets = new Set(
+              (prev.daily_summary_bullets || []).map((b) => b.text),
+            );
+            const newBullets = (data.daily_summary_bullets || []).filter(
+              (b) => !existingBullets.has(b.text),
+            );
+            const mergedBullets = [
+              ...(prev.daily_summary_bullets || []),
+              ...newBullets,
+            ];
+
+            return {
+              ...data,
+              critical_incidents:
+                prev.critical_incidents + data.critical_incidents,
+              warnings: prev.warnings + data.warnings,
+              errors: prev.errors + data.errors,
+              overall_status:
+                data.overall_status === "CRITICAL" ||
+                prev.overall_status === "CRITICAL"
+                  ? "CRITICAL"
+                  : data.overall_status === "WARNING" ||
+                      prev.overall_status === "WARNING"
+                    ? "WARNING"
+                    : "OK",
+              complete_findings: mergedFindings,
+              daily_summary_bullets: mergedBullets,
+              analyzed_line_count:
+                (prev.analyzed_line_count || 0) +
+                (data.analyzed_line_count || 0),
+              original_line_count:
+                data.original_line_count || prev.original_line_count,
+            };
+          });
+
+          const notifType =
+            data.overall_status === "CRITICAL"
+              ? ("error" as const)
+              : data.overall_status === "WARNING"
+                ? ("warning" as const)
+                : ("success" as const);
+
+          addNotification({
+            type: notifType,
+            title: `Continuous Monitoring: ${data.instrument_name}`,
+            message: `New log lines analyzed. Status: ${data.overall_status}`,
+          });
+        } catch (err) {
+          console.error("Failed to parse live SSE data", err);
+        }
+      };
+
+      es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED) {
+          console.error("SSE connection closed");
+          setIsLive(false);
+        }
+      };
+    },
+    [result?.instrument_id, addNotification],
+  );
+
+  const fetchMemory = useCallback(async (instrumentId?: number) => {
+    const targetId = instrumentId || result?.instrument_id;
+    if (!targetId) return;
+    setIsLoadingMemory(true);
+    try {
+      const data = await api.getInstrumentMemory(targetId);
+      setMemory(data);
+    } catch (err) {
+      console.error("Failed to fetch instrument memory:", err);
+    } finally {
+      setIsLoadingMemory(false);
+    }
+  }, [result?.instrument_id]);
+
+  const toggleMemoryView = useCallback(async () => {
+    if (showMemory) {
+      setShowMemory(false);
+    } else {
+      await fetchMemory();
+      setShowMemory(true);
+    }
+  }, [showMemory, fetchMemory]);
+
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, []);
+
   const resetAnalysisResults = () => {
+    stopContinuousMonitoring();
     setResult(null);
     setKeywordResult(null);
+    setMemory(null);
+    setShowMemory(false);
     setError(null);
     setKeywordError(null);
   };
+
 
   const addKeywords = (value: string) => {
     const additions = value
@@ -157,6 +324,8 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
           errors: dashboardResult.errors,
         },
       });
+      // Automatically initiate live continuous line monitoring for this instrument
+      startContinuousMonitoring(dashboardResult.instrument_id);
       // Pick up any newly learned error-related keywords from this run.
       refreshKeywordSuggestions(dashboardResult.instrument_id);
     } catch (requestError) {
@@ -248,6 +417,17 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         isKeywordSearching,
         error,
         keywordError,
+        isLive,
+        isContinuousMonitoringActive,
+        startContinuousMonitoring,
+        stopContinuousMonitoring,
+        memory,
+        setMemory,
+        showMemory,
+        setShowMemory,
+        isLoadingMemory,
+        fetchMemory,
+        toggleMemoryView,
         resetAnalysisResults,
         clearKeywordResult: () => setKeywordResult(null),
         addKeywords,
@@ -259,6 +439,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     </MonitoringContext.Provider>
   );
 }
+
 
 export function useMonitoring() {
   const context = useContext(MonitoringContext);

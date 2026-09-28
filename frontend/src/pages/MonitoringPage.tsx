@@ -19,12 +19,14 @@ import {
   Search,
   Tags,
   Calendar,
+  FolderOpen,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { KeywordSearchSection } from "../components/monitoring/KeywordSearchSection";
-import { AutoKbSolution } from "../components/monitoring/AutoKbSolution";
+import { FindingCard } from "../components/monitoring/FindingCard";
 import { NoYearDateTimePicker } from "../components/common/NoYearDateTimePicker";
 import { useSystem } from "../context/SystemContext";
+
 import { useMonitoring } from "../context/MonitoringContext";
 import {
   Card,
@@ -37,7 +39,6 @@ import { Badge } from "../components/common/Badge";
 import { api } from "../api/client";
 import type {
   DashboardResult,
-  InstrumentMemoryResponse,
   DashboardBullet,
 } from "../types";
 
@@ -145,15 +146,10 @@ function FeedbackForm({ bullet }: { bullet: DashboardBullet }) {
 }
 
 export function MonitoringPage() {
-  const [memory, setMemory] = useState<InstrumentMemoryResponse | null>(null);
-  const [showMemory, setShowMemory] = useState(false);
-  const [isLoadingMemory, setIsLoadingMemory] = useState(false);
-  const [isLive, setIsLive] = useState(false);
   const {
     logFiles,
     setLogFiles,
     result,
-    setResult,
     keywordResult,
     keywords,
     setKeywords,
@@ -172,15 +168,126 @@ export function MonitoringPage() {
     isKeywordSearching,
     error,
     keywordError,
+    isLive,
+    isContinuousMonitoringActive: _isContinuousMonitoringActive,
+    startContinuousMonitoring,
+    stopContinuousMonitoring,
+    memory,
+    showMemory,
+    isLoadingMemory,
+    toggleMemoryView,
     resetAnalysisResults,
     clearKeywordResult,
     addKeywords,
     runCompleteAnalysis,
     runKeywordSearch,
   } = useMonitoring();
-  const { addNotification } = useSystem();
 
-  const MAX_LOGS = 10;
+  const { addNotification } = useSystem();
+  const [selectedFolderName, setSelectedFolderName] = useState<string | null>(null);
+
+  const MAX_LOGS = 50;
+
+  const validSelectedFiles = logFiles.filter((f): f is File => f !== null);
+
+  const filterLogFiles = (fileList: FileList | File[]): File[] => {
+    return Array.from(fileList).filter((file) => {
+      const name = file.name.toLowerCase();
+      if (name.startsWith(".")) return false;
+      if (
+        name.endsWith(".exe") ||
+        name.endsWith(".dll") ||
+        name.endsWith(".zip") ||
+        name.endsWith(".tar") ||
+        name.endsWith(".gz") ||
+        name.endsWith(".pdf") ||
+        name.endsWith(".png") ||
+        name.endsWith(".jpg") ||
+        name.endsWith(".jpeg")
+      ) {
+        return false;
+      }
+      return (
+        name.endsWith(".log") ||
+        name.endsWith(".txt") ||
+        name.endsWith(".csv") ||
+        name.endsWith(".out") ||
+        !name.includes(".")
+      );
+    });
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const handleFilesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const selected = filterLogFiles(e.target.files);
+      if (selected.length > 0) {
+        const currentValid = logFiles.filter((f): f is File => f !== null);
+        const existingNames = new Set(currentValid.map((f) => f.name));
+        const newUnique = selected.filter((f) => !existingNames.has(f.name));
+        const updated = [...currentValid, ...newUnique].slice(0, MAX_LOGS);
+        setLogFiles(updated.length > 0 ? updated : [null]);
+        clearResultsForNewFiles();
+        addNotification({
+          type: "info",
+          title: "Files Added",
+          message: `Added ${newUnique.length} log file(s). Total: ${updated.length}`,
+        });
+      }
+      e.target.value = "";
+    }
+  };
+
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const selected = filterLogFiles(e.target.files);
+      if (selected.length > 0) {
+        const firstPath = (selected[0] as unknown as { webkitRelativePath?: string }).webkitRelativePath;
+        const folderName = firstPath ? firstPath.split("/")[0] : "Instrument Logs";
+        setSelectedFolderName(folderName);
+
+        const currentValid = logFiles.filter((f): f is File => f !== null);
+        const existingNames = new Set(currentValid.map((f) => f.name));
+        const newUnique = selected.filter((f) => !existingNames.has(f.name));
+        const updated = [...currentValid, ...newUnique].slice(0, MAX_LOGS);
+        setLogFiles(updated.length > 0 ? updated : [null]);
+        clearResultsForNewFiles();
+        addNotification({
+          type: "success",
+          title: "Folder Loaded",
+          message: `Loaded ${selected.length} log file(s) from folder "${folderName}".`,
+        });
+      } else {
+        addNotification({
+          type: "warning",
+          title: "No Log Files Found",
+          message: "The selected folder did not contain any valid .log or .txt files.",
+        });
+      }
+      e.target.value = "";
+    }
+  };
+
+  const handleRemoveSingleFile = (index: number) => {
+    const valid = logFiles.filter((f): f is File => f !== null);
+    const updated = valid.filter((_, i) => i !== index);
+    setLogFiles(updated.length > 0 ? updated : [null]);
+    if (updated.length === 0) {
+      setSelectedFolderName(null);
+    }
+    clearResultsForNewFiles();
+  };
+
+  const handleClearAllFiles = () => {
+    setLogFiles([null]);
+    setSelectedFolderName(null);
+    clearResultsForNewFiles();
+  };
   // Fallback terms shown until the system has learned real error-related keywords from analyzed logs.
   const DEFAULT_KEYWORD_SUGGESTIONS = [
     "error",
@@ -210,76 +317,12 @@ export function MonitoringPage() {
 
   const clearResultsForNewFiles = () => {
     resetAnalysisResults();
-    setMemory(null);
-    setShowMemory(false);
   };
-
-  // Setup SSE for live continuous monitoring
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-
-    if (result && result.instrument_id && !isMonitoring) {
-      setIsLive(true);
-      eventSource = api.streamDashboard(result.instrument_id);
-
-      eventSource.onmessage = (event) => {
-        try {
-          const data: DashboardResult = JSON.parse(event.data);
-          setResult(data);
-
-          // Optionally refetch memory history automatically when a new analysis is complete
-          if (showMemory && result?.instrument_id) {
-            api.getInstrumentMemory(result.instrument_id).then(setMemory);
-          }
-
-          // Show toast for incremental updates
-          const notifType =
-            data.overall_status === "CRITICAL"
-              ? ("error" as const)
-              : data.overall_status === "WARNING"
-                ? ("warning" as const)
-                : ("success" as const);
-
-          addNotification({
-            type: notifType,
-            title: `Live Update: ${data.instrument_name}`,
-            message: `New log lines analyzed. Status: ${data.overall_status}`,
-          });
-        } catch (err) {
-          console.error("Failed to parse SSE data", err);
-        }
-      };
-
-      eventSource.onerror = () => {
-        console.error("SSE connection error");
-        setIsLive(false);
-      };
-    }
-
-    return () => {
-      if (eventSource) {
-        eventSource.close();
-        setIsLive(false);
-      }
-    };
-  }, [result?.instrument_id, isMonitoring, showMemory, addNotification]);
 
   const handleViewMemory = async () => {
-    if (showMemory && result?.instrument_id) {
-      setShowMemory(false);
-    } else if (result?.instrument_id) {
-      setIsLoadingMemory(true);
-      try {
-        const memoryData = await api.getInstrumentMemory(result.instrument_id);
-        setMemory(memoryData);
-        setShowMemory(true);
-      } catch (err) {
-        console.error("Failed to fetch instrument memory:", err);
-      } finally {
-        setIsLoadingMemory(false);
-      }
-    }
+    await toggleMemoryView();
   };
+
 
   const getAnalysisStatusBadge = (result: DashboardResult) => {
     if (!result.analysis_status) return null;
@@ -350,106 +393,234 @@ export function MonitoringPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-800">
-          Proactive Log Monitoring
-        </h1>
-        {result && (
-          <Button
-            variant="outline"
-            onClick={handleViewMemory}
-            className="text-sm"
-            isLoading={isLoadingMemory}
-          >
-            <History size={16} className="mr-2" />{" "}
-            {showMemory ? "Hide History" : "View Analysis History"}
-          </Button>
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">
+            Proactive Log Monitoring
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Continuous background log inspection with deep forensic line pinpointing
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {result && (
+            <>
+              {isLive ? (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg shadow-xs">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-xs font-semibold text-emerald-800">
+                    Continuous Monitoring Active
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={stopContinuousMonitoring}
+                    className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 ml-1.5 bg-white"
+                  >
+                    Stop Monitoring
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg shadow-xs">
+                  <span className="h-2.5 w-2.5 rounded-full bg-slate-400"></span>
+                  <span className="text-xs font-semibold text-slate-700">
+                    Monitoring Paused
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => startContinuousMonitoring(result.instrument_id)}
+                    className="h-7 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 ml-1.5 bg-white"
+                  >
+                    Resume Monitoring
+                  </Button>
+                </div>
+              )}
+
+              <Button
+                variant="outline"
+                onClick={handleViewMemory}
+                className="text-sm"
+                isLoading={isLoadingMemory}
+              >
+                <History size={16} className="mr-2" />{" "}
+                {showMemory ? "Hide History" : "View Analysis History"}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+
 
       {/* Upload Form */}
       <Card>
         <CardContent className="p-6">
           <div className="space-y-5">
-            {/* File Upload */}
+            {/* File & Folder Selection */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Upload Machine Log Files (Max {MAX_LOGS})
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Select Log Files or Entire Folder (Max {MAX_LOGS})
+                </label>
+                {selectedFolderName && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-50 text-primary-700 border border-primary-200">
+                    <FolderOpen size={12} />
+                    Folder: {selectedFolderName}
+                  </span>
+                )}
+              </div>
 
-              <div className="space-y-3">
-                {logFiles.map((file, index) => (
-                  <div key={index} className="flex items-center gap-3">
-                    <div className="relative flex-1 flex items-center border border-slate-300 rounded-md bg-white overflow-hidden h-10">
-                      <input
-                        type="file"
-                        id={`file-upload-${index}`}
-                        className="sr-only"
-                        onChange={(e) => {
-                          const selectedFile = e.target.files?.[0] || null;
-                          const newFiles = [...logFiles];
-                          newFiles[index] = selectedFile;
-                          setLogFiles(newFiles);
-                          clearResultsForNewFiles();
-                        }}
-                        disabled={isMonitoring}
-                      />
+              {/* If no files selected yet, show prominent dual upload boxes */}
+              {validSelectedFiles.length === 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* File Upload Box */}
+                  <label
+                    className={`flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg bg-slate-50/70 hover:bg-slate-100/70 transition-colors text-center ${
+                      isMonitoring ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+                    }`}
+                  >
+                    <Upload size={24} className="text-slate-400 mb-2" />
+                    <span className="text-sm font-semibold text-slate-700">
+                      Upload Log File(s)
+                    </span>
+                    <span className="text-xs text-slate-500 mt-0.5">
+                      Select single or multiple .log, .txt files
+                    </span>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".log,.txt,.csv,.out"
+                      className="sr-only"
+                      onChange={handleFilesSelect}
+                      disabled={isMonitoring || isKeywordSearching}
+                    />
+                  </label>
+
+                  {/* Folder Upload Box */}
+                  <label
+                    className={`flex flex-col items-center justify-center p-6 border-2 border-dashed border-primary-200 rounded-lg bg-primary-50/30 hover:bg-primary-50/60 transition-colors text-center ${
+                      isMonitoring ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+                    }`}
+                  >
+                    <FolderOpen size={24} className="text-primary-600 mb-2" />
+                    <span className="text-sm font-semibold text-primary-900">
+                      Select Entire Log Folder
+                    </span>
+                    <span className="text-xs text-primary-700 mt-0.5">
+                      Choose an instrument directory containing log archives
+                    </span>
+                    <input
+                      type="file"
+                      // @ts-expect-error webkitdirectory is standard in modern browsers
+                      webkitdirectory="true"
+                      directory=""
+                      multiple
+                      className="sr-only"
+                      onChange={handleFolderSelect}
+                      disabled={isMonitoring || isKeywordSearching}
+                    />
+                  </label>
+                </div>
+              ) : (
+                /* Files are selected: show summary bar + scrollable file list + action buttons */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                      <FileText size={16} className="text-primary-600" />
+                      <span>{validSelectedFiles.length} file(s) loaded</span>
+                      {selectedFolderName && (
+                        <span className="text-slate-400 font-normal">
+                          from folder <strong className="text-slate-600 font-semibold">{selectedFolderName}</strong>
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* Add more files button */}
                       <label
-                        htmlFor={`file-upload-${index}`}
-                        className={`cursor-pointer h-full px-4 flex items-center border-r border-slate-300 font-medium text-sm transition-colors ${
-                          isMonitoring
-                            ? "bg-slate-50 text-slate-400"
-                            : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                        className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors ${
+                          isMonitoring ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
                         }`}
                       >
-                        <Upload size={16} className="mr-2" />
-                        Browse
-                      </label>
-                      <div className="px-3 flex items-center gap-2 text-slate-500 font-mono text-sm truncate flex-1">
-                        <FileText
-                          size={16}
-                          className={
-                            file ? "text-primary-500" : "text-slate-300"
-                          }
+                        <Plus size={13} />
+                        Add Files
+                        <input
+                          type="file"
+                          multiple
+                          accept=".log,.txt,.csv,.out"
+                          className="sr-only"
+                          onChange={handleFilesSelect}
+                          disabled={isMonitoring || isKeywordSearching}
                         />
-                        {file ? file.name : "No file selected..."}
-                      </div>
-                    </div>
-                    {logFiles.length > 1 && (
+                      </label>
+
+                      {/* Select folder button */}
+                      <label
+                        className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded border border-primary-200 bg-primary-50 hover:bg-primary-100 text-primary-800 transition-colors ${
+                          isMonitoring ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+                        }`}
+                      >
+                        <FolderOpen size={13} />
+                        Select Folder
+                        <input
+                          type="file"
+                          // @ts-expect-error webkitdirectory is standard in modern browsers
+                          webkitdirectory="true"
+                          directory=""
+                          multiple
+                          className="sr-only"
+                          onChange={handleFolderSelect}
+                          disabled={isMonitoring || isKeywordSearching}
+                        />
+                      </label>
+
                       <button
                         type="button"
-                        className="text-slate-400 hover:text-red-500 shrink-0 p-2 rounded hover:bg-slate-50 transition-colors"
-                        onClick={() => {
-                          setLogFiles(logFiles.filter((_, i) => i !== index));
-                          clearResultsForNewFiles();
-                        }}
+                        onClick={handleClearAllFiles}
                         disabled={isMonitoring || isKeywordSearching}
+                        className="text-xs text-red-600 hover:text-red-700 font-medium px-2 py-1 transition-colors"
                       >
-                        <X size={20} />
+                        Clear All
                       </button>
-                    )}
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setLogFiles([...logFiles, null]);
-                  clearResultsForNewFiles();
-                }}
-                disabled={
-                  isMonitoring ||
-                  isKeywordSearching ||
-                  logFiles.length >= MAX_LOGS
-                }
-                className="text-sm"
-              >
-                <Plus size={16} className="mr-1" /> Add Another File
-              </Button>
+                  {/* Scrollable list of files */}
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {validSelectedFiles.map((file, index) => {
+                      const relPath = (file as unknown as { webkitRelativePath?: string }).webkitRelativePath;
+                      return (
+                        <div
+                          key={`${file.name}-${index}`}
+                          className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-md text-xs shadow-2xs hover:border-slate-300 transition-colors"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <FileText size={15} className="text-primary-500 shrink-0" />
+                            <span className="font-mono text-slate-700 truncate" title={relPath || file.name}>
+                              {relPath || file.name}
+                            </span>
+                            <span className="text-[11px] text-slate-400 shrink-0">
+                              ({formatFileSize(file.size)})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSingleFile(index)}
+                            disabled={isMonitoring || isKeywordSearching}
+                            className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-slate-100 transition-colors shrink-0 ml-2"
+                            title="Remove file"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Date & Time Range Filter */}
@@ -873,7 +1044,7 @@ export function MonitoringPage() {
                   <div className="flex items-center justify-between gap-3">
                     <CardTitle className="text-base flex items-center gap-2">
                       <FileText size={18} className="text-primary-500" />{" "}
-                      Complete file findings
+                      Complete File Findings & Forensics
                     </CardTitle>
                     <Badge variant="default">
                       {result.coverage_mode === "fast"
@@ -884,65 +1055,22 @@ export function MonitoringPage() {
                   <p className="text-xs text-slate-500 mt-1">
                     {result.analyzed_line_count?.toLocaleString() ?? 0} of{" "}
                     {result.original_line_count?.toLocaleString() ?? 0} lines
-                    analyzed
+                    analyzed • AI pinpointed issue lines, AI summaries & pre-incident sequences
                   </p>
                 </CardHeader>
-                <CardContent className="p-0">
+                <CardContent className="p-4">
                   {!result.complete_findings?.length ? (
                     <p className="p-6 text-center text-slate-500">
                       No error, warning, or critical lines were detected.
                     </p>
                   ) : (
-                    <div className="divide-y divide-slate-100 max-h-[38rem] overflow-y-auto">
+                    <div className="space-y-4 max-h-[46rem] overflow-y-auto pr-1">
                       {result.complete_findings.map((finding, index) => (
-                        <div
+                        <FindingCard
                           key={`${finding.filename}-${finding.line_number}-${index}`}
-                          className={clsx(
-                            "border-l-4 px-4 py-3 space-y-2",
-                            finding.severity === "critical"
-                              ? "border-l-red-600 bg-red-50/70"
-                              : finding.severity === "error"
-                                ? "border-l-orange-500 bg-orange-50/70"
-                                : "border-l-amber-500 bg-amber-50/70",
-                          )}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-semibold text-slate-700">
-                              {finding.filename} · line {finding.line_number}
-                            </span>
-                            <Badge
-                              variant={
-                                finding.severity === "critical" ||
-                                finding.severity === "error"
-                                  ? "error"
-                                  : "warning"
-                              }
-                            >
-                              {finding.severity.toUpperCase()}
-                            </Badge>
-                          </div>
-                          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-slate-700 bg-white/80 p-2 rounded border border-slate-200/60">
-                            {finding.snippet}
-                          </pre>
-                          <p className="text-xs text-slate-600">
-                            {finding.explanation} ({finding.detected_by})
-                          </p>
-
-                          {/* Automatic Knowledge Base Article Resolution */}
-                          <AutoKbSolution
-                            initialArticle={finding.kb_article}
-                            searchQuery={finding.explanation}
-                            candidateQueries={[
-                              finding.explanation,
-                              finding.snippet,
-                            ]}
-                            isError={
-                              finding.severity === "error" ||
-                              finding.severity === "critical"
-                            }
-                            compact={true}
-                          />
-                        </div>
+                          finding={finding}
+                          instrumentName={result.instrument_name}
+                        />
                       ))}
                     </div>
                   )}
@@ -950,6 +1078,7 @@ export function MonitoringPage() {
               </Card>
             </div>
           )}
+
 
       {/* ===== INSTRUMENT MEMORY / HISTORY ===== */}
       {showMemory && memory && (

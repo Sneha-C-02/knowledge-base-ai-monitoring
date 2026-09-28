@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, MessageSquare, Activity, BookOpen, Bell, History } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Activity, BookOpen, Bell, History, Sparkles } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const navItems = [
   { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
   { name: 'Reactive Support', path: '/support', icon: MessageSquare },
   { name: 'Log Monitoring', path: '/monitoring', icon: Activity },
+  { name: 'Keyword Discovery', path: '/keyword-discovery', icon: Sparkles },
   { name: 'Knowledge Base', path: '/knowledge-base', icon: BookOpen },
   { name: 'Notifications', path: '/notifications', icon: Bell },
   { name: 'Activity', path: '/activity', icon: History }

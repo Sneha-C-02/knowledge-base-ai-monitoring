@@ -121,7 +121,8 @@ class ContinuousMonitoringService:
                                 filename=monitored.filename,
                                 instrument_id=monitored.instrument_id,
                                 instrument_name=instrument.name,
-                                memory_entries=memory_entries
+                                memory_entries=memory_entries,
+                                analysis_mode="fast",
                             )
                             
                             # Broadcast the result to SSE clients
@@ -133,4 +134,5 @@ class ContinuousMonitoringService:
                             session_context.reset(token)
 
                 except Exception as e:
+                    await session.rollback()
                     logger.error(f"Error checking file {monitored.filename}: {e}")

@@ -35,6 +35,15 @@ class DashboardFindingSchema(BaseModel):
     explanation: str
     detected_by: str
     kb_article: Optional[KeywordArticleSchema] = None
+    simple_summary: Optional[str] = None
+    pre_incident_summary: Optional[str] = None
+    pre_incident_pattern: Optional[str] = None
+    pre_incident_events: Optional[List[dict]] = None
+    major_events: Optional[List[dict]] = None
+    system_changes: Optional[List[dict]] = None
+    grounding_citations: Optional[List[dict]] = None
+    confidence_score: Optional[float] = None
+    suggested_search_query: Optional[str] = None
 
 
 class LogDashboardResponse(BaseModel):
@@ -133,3 +142,69 @@ class AiLearningFeedbackResponseSchema(BaseModel):
     result: bool
     helpful_points: Optional[str]
     created_at: str
+
+
+class FindingKbSearchRequest(BaseModel):
+    snippet: str
+    explanation: Optional[str] = None
+    filename: Optional[str] = None
+    line_number: Optional[int] = None
+    search_query: Optional[str] = None
+    instrument_name: Optional[str] = None
+
+
+class FindingKbSearchResponse(BaseModel):
+    kb_article: Optional[KeywordArticleSchema] = None
+    search_query: str
+    found: bool
+
+
+class DiscoveredKeywordSchema(BaseModel):
+    keyword: str
+    severity: str
+    failure_indicator: str
+    occurrence_count: int
+    sample_line: str
+    sample_line_number: int
+    sample_file: str
+    confidence_score: float
+
+
+class DiscoverKeywordsResponse(BaseModel):
+    keywords: List[DiscoveredKeywordSchema]
+    total_discovered: int
+    files_scanned: int
+
+
+class AcceptKeywordRequest(BaseModel):
+    keyword: str
+    severity: str = "warning"
+    failure_indicator: Optional[str] = None
+    sample_line: Optional[str] = None
+    notes: Optional[str] = None
+    instrument_id: Optional[int] = 0
+
+
+class RejectKeywordRequest(BaseModel):
+    keyword: str
+    reason: Optional[str] = None
+
+
+class AcceptedKeywordSchema(BaseModel):
+    id: int
+    instrument_id: int = 0
+    keyword: str
+    severity: str
+    occurrence_count: int = 1
+    failure_indicator: Optional[str] = None
+    sample_line: Optional[str] = None
+    notes: Optional[str] = None
+    status: str = "accepted"
+    first_seen_at: Optional[str] = None
+    last_seen_at: Optional[str] = None
+
+
+class AcceptedKeywordsListResponse(BaseModel):
+    keywords: List[AcceptedKeywordSchema]
+    total: int
+

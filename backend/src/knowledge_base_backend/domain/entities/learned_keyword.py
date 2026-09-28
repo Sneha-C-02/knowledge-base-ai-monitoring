@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
+
 
 
 @dataclass
@@ -17,3 +19,8 @@ class LearnedKeyword:
     occurrence_count: int
     first_seen_at: datetime
     last_seen_at: datetime
+    status: str = "accepted"
+    failure_indicator: Optional[str] = None
+    sample_line: Optional[str] = None
+    notes: Optional[str] = None
+
