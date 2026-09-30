@@ -176,6 +176,8 @@ class AnalyzeLogsWithMemoryUseCase:
             aggregated_result.daily_summary_bullets.extend(result.daily_summary_bullets)
             aggregated_result.complete_findings.extend(result.complete_findings)
             aggregated_result.files_analyzed += 1
+            if hasattr(result, "monitored_files") and result.monitored_files:
+                aggregated_result.monitored_files.extend(result.monitored_files)
 
             # Aggregate analysis status and chunks
             if not hasattr(aggregated_result, "total_chunks"):
@@ -314,6 +316,7 @@ class AnalyzeLogsWithMemoryUseCase:
                 full_context_summary=context_summary,
                 created_at=current_time,
                 updated_at=current_time,
+                status="MONITORING",
             )
             await self.monitored_file_repository.save(monitored)
 
@@ -344,6 +347,7 @@ class AnalyzeLogsWithMemoryUseCase:
                 )
                 monitored.full_context_summary = context_summary
                 monitored.total_lines_analyzed = total_lines
+                monitored.status = "MONITORING"
                 monitored.updated_at = current_time
                 await self.monitored_file_repository.update(monitored)
             else:
@@ -377,6 +381,7 @@ class AnalyzeLogsWithMemoryUseCase:
                 # Update the MonitoredLogFile record
                 monitored.total_lines_analyzed = total_lines
                 monitored.full_context_summary = updated_summary
+                monitored.status = "MONITORING"
                 monitored.updated_at = current_time
                 await self.monitored_file_repository.update(monitored)
 
@@ -401,6 +406,16 @@ class AnalyzeLogsWithMemoryUseCase:
 
         # Enrich findings with deep forensic features and plain-English simple AI explanation
         self._enrich_findings_with_forensics(result.complete_findings, all_lines, filename)
+
+        result.monitoring_status = "MONITORING"
+        result.monitored_files = [
+            {
+                "filename": filename,
+                "status": getattr(monitored, "status", "MONITORING") or "MONITORING",
+                "total_lines_analyzed": monitored.total_lines_analyzed,
+                "updated_at": monitored.updated_at.isoformat() if hasattr(monitored.updated_at, "isoformat") else str(monitored.updated_at),
+            }
+        ]
 
         return result
 

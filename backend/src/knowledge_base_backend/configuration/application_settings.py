@@ -17,6 +17,7 @@ class ApplicationSettings(BaseSettings):
     jwt_secret_key: str
     jwt_signing_algorithm: str = "HS256"
     jwt_access_token_expiration_minutes: int = 60
+    jwt_password_reset_token_expiration_minutes: int = 15
 
     allowed_frontend_origins: str = "http://localhost:5173"
     maximum_article_page_size: int = 100

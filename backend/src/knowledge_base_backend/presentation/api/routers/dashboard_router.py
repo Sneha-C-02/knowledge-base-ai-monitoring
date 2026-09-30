@@ -9,6 +9,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 import logging
+import os
+import aiofiles
+from src.knowledge_base_backend.application.services.continuous_monitoring_service import ContinuousMonitoringService
 from src.knowledge_base_backend.application.use_cases.analyze_logs_with_memory import AnalyzeLogsWithMemoryUseCase
 from src.knowledge_base_backend.application.use_cases.discover_failure_keywords import DiscoverFailureKeywordsUseCase
 from src.knowledge_base_backend.application.use_cases.get_learned_keyword_suggestions import (
@@ -23,7 +26,9 @@ from src.knowledge_base_backend.domain.repositories.ai_learning_feedback_reposit
 from src.knowledge_base_backend.domain.repositories.instrument_memory_repository import InstrumentMemoryRepository
 from src.knowledge_base_backend.domain.repositories.instrument_repository import InstrumentRepository
 from src.knowledge_base_backend.domain.repositories.learned_keyword_repository import LearnedKeywordRepository
+from src.knowledge_base_backend.domain.repositories.monitored_log_file_repository import MonitoredLogFileRepository
 from src.knowledge_base_backend.domain.services.hybrid_article_retrieval_service import HybridArticleRetrievalService
+from src.knowledge_base_backend.domain.services.persistent_file_storage import PersistentFileStorage
 from src.knowledge_base_backend.infrastructure.events.event_bus import EventBus
 from src.knowledge_base_backend.presentation.api.dependencies.authentication_dependencies import get_current_user_token
 from src.knowledge_base_backend.presentation.api.schemas.dashboard_schemas import (
@@ -32,6 +37,8 @@ from src.knowledge_base_backend.presentation.api.schemas.dashboard_schemas impor
     AcceptedKeywordsListResponse,
     AiLearningFeedbackResponseSchema,
     AiLearningFeedbackSubmitSchema,
+    AppendLogLinesRequest,
+    AppendLogLinesResponse,
     DashboardFindingSchema,
     DashboardSummaryBulletSchema,
     DiscoverKeywordsResponse,
@@ -40,6 +47,7 @@ from src.knowledge_base_backend.presentation.api.schemas.dashboard_schemas impor
     FindingKbSearchResponse,
     InstrumentMemoryEntrySchema,
     InstrumentMemoryResponse,
+    InstrumentMonitoringStatusResponse,
     InstrumentSchema,
     KeywordArticleSchema,
     KeywordFindingSchema,
@@ -47,6 +55,7 @@ from src.knowledge_base_backend.presentation.api.schemas.dashboard_schemas impor
     KeywordSuggestionSchema,
     KeywordSuggestionsResponse,
     LogDashboardResponse,
+    MonitoredFileSchema,
     RejectKeywordRequest,
 )
 
@@ -207,6 +216,16 @@ async def analyze_logs_with_dashboard(
 
         date_from=date_from,
         date_to=date_to,
+        monitoring_status=getattr(result, "monitoring_status", "MONITORING"),
+        monitored_files=[
+            MonitoredFileSchema(
+                filename=f.get("filename") if isinstance(f, dict) else f.filename,
+                status=f.get("status", "MONITORING") if isinstance(f, dict) else getattr(f, "status", "MONITORING"),
+                total_lines_analyzed=f.get("total_lines_analyzed", 0) if isinstance(f, dict) else getattr(f, "total_lines_analyzed", 0),
+                updated_at=f.get("updated_at") if isinstance(f, dict) else getattr(f, "updated_at", None),
+            )
+            for f in getattr(result, "monitored_files", [])
+        ],
     )
 
 
@@ -331,9 +350,23 @@ async def stream_dashboard_updates(
         topic = str(instrument_id)
         queue = await event_bus.subscribe(topic)
         try:
+            # Send initial event confirming active monitoring state
+            init_event = {
+                "type": "MONITORING_ACTIVE",
+                "instrument_id": instrument_id,
+                "status": "MONITORING",
+                "message": f"Continuous monitoring active for instrument {instrument_id}",
+            }
+            yield f"data: {json.dumps(init_event)}\n\n"
+
             while True:
-                # Wait for a new dashboard result from the continuous monitoring service
-                dashboard_result = await queue.get()
+                try:
+                    # Wait for a new dashboard result from the continuous monitoring service
+                    dashboard_result = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # Keep-alive heartbeat comment to prevent proxy and browser timeouts
+                    yield ": ping\n\n"
+                    continue
 
                 # Format the result as a dict matching LogDashboardResponse schema
                 data = {
@@ -345,6 +378,16 @@ async def stream_dashboard_updates(
                     "healthy_apps": dashboard_result.healthy_apps,
                     "overall_status": dashboard_result.overall_status,
                     "files_analyzed": dashboard_result.files_analyzed,
+                    "monitoring_status": "MONITORING",
+                    "monitored_files": [
+                        {
+                            "filename": f.get("filename") if isinstance(f, dict) else f.filename,
+                            "status": f.get("status", "MONITORING") if isinstance(f, dict) else getattr(f, "status", "MONITORING"),
+                            "total_lines_analyzed": f.get("total_lines_analyzed", 0) if isinstance(f, dict) else getattr(f, "total_lines_analyzed", 0),
+                            "updated_at": f.get("updated_at") if isinstance(f, dict) else getattr(f, "updated_at", None),
+                        }
+                        for f in getattr(dashboard_result, "monitored_files", [])
+                    ],
                     "daily_summary_bullets": [
                         {
                             "text": b.text,
@@ -385,7 +428,6 @@ async def stream_dashboard_updates(
                         }
                         for finding in getattr(dashboard_result, "complete_findings", [])
                     ],
-
                 }
 
                 yield f"data: {json.dumps(data)}\n\n"
@@ -396,6 +438,111 @@ async def stream_dashboard_updates(
             await event_bus.unsubscribe(topic, queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/status/{instrument_id}", response_model=InstrumentMonitoringStatusResponse)
+@inject
+async def get_instrument_monitoring_status(
+    instrument_id: int,
+    token: str = Depends(get_current_user_token),
+    monitored_repo: MonitoredLogFileRepository = Depends(Provide[ApplicationContainer.monitored_log_file_repository]),
+    instrument_repo: InstrumentRepository = Depends(Provide[ApplicationContainer.instrument_repository]),
+):
+    """
+    Get active continuous monitoring status and file details for an instrument.
+    """
+    instrument = await instrument_repo.get_by_id(instrument_id)
+    files = await monitored_repo.find_by_instrument_id(instrument_id)
+    is_active = any(f.status == "MONITORING" for f in files) if files else False
+    return InstrumentMonitoringStatusResponse(
+        instrument_id=instrument_id,
+        instrument_name=instrument.name if instrument else "Unknown Instrument",
+        is_active=is_active,
+        status="MONITORING" if is_active else "IDLE",
+        monitored_files=[
+            MonitoredFileSchema(
+                filename=f.filename,
+                status=f.status,
+                total_lines_analyzed=f.total_lines_analyzed,
+                updated_at=f.updated_at.isoformat() if f.updated_at else None,
+            )
+            for f in files
+        ],
+    )
+
+
+@router.post("/append-lines", response_model=AppendLogLinesResponse)
+@inject
+async def append_lines_to_monitored_file(
+    payload: AppendLogLinesRequest,
+    token: str = Depends(get_current_user_token),
+    storage: PersistentFileStorage = Depends(Provide[ApplicationContainer.persistent_file_storage]),
+    monitoring_service: ContinuousMonitoringService = Depends(Provide[ApplicationContainer.continuous_monitoring_service]),
+):
+    """
+    Appends new log lines to an existing monitored log file on disk and triggers
+    continuous monitoring analysis immediately.
+    """
+    file_path = await storage.get_file_path(payload.instrument_id, payload.filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Monitored file '{payload.filename}' not found for instrument {payload.instrument_id}. Please analyze the file first."
+        )
+
+    lines_to_append = payload.lines
+    if not lines_to_append.endswith("\n"):
+        lines_to_append += "\n"
+
+    async with aiofiles.open(file_path, "a", encoding="utf-8", errors="replace") as f:
+        await f.write(lines_to_append)
+
+    # Count total lines now
+    async with aiofiles.open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        content = await f.read()
+    total_lines = len(content.split("\n"))
+    lines_count = len([line for line in lines_to_append.split("\n") if line.strip()])
+
+    # Immediately trigger continuous monitoring check
+    await monitoring_service.check_file_now(payload.instrument_id, payload.filename)
+
+    return AppendLogLinesResponse(
+        instrument_id=payload.instrument_id,
+        filename=payload.filename,
+        lines_appended=lines_count,
+        total_lines=total_lines,
+        status="MONITORING",
+    )
+
+
+@router.post("/pause/{instrument_id}")
+@inject
+async def pause_instrument_monitoring(
+    instrument_id: int,
+    token: str = Depends(get_current_user_token),
+    monitored_repo: MonitoredLogFileRepository = Depends(Provide[ApplicationContainer.monitored_log_file_repository]),
+):
+    """Pause continuous monitoring for all files on an instrument."""
+    files = await monitored_repo.find_by_instrument_id(instrument_id)
+    for f in files:
+        await monitored_repo.update_status(instrument_id, f.filename, "PAUSED")
+    return {"instrument_id": instrument_id, "status": "PAUSED"}
+
+
+@router.post("/resume/{instrument_id}")
+@inject
+async def resume_instrument_monitoring(
+    instrument_id: int,
+    token: str = Depends(get_current_user_token),
+    monitored_repo: MonitoredLogFileRepository = Depends(Provide[ApplicationContainer.monitored_log_file_repository]),
+    monitoring_service: ContinuousMonitoringService = Depends(Provide[ApplicationContainer.continuous_monitoring_service]),
+):
+    """Resume continuous monitoring for all files on an instrument."""
+    files = await monitored_repo.find_by_instrument_id(instrument_id)
+    for f in files:
+        await monitored_repo.update_status(instrument_id, f.filename, "MONITORING")
+    await monitoring_service.check_file_now(instrument_id)
+    return {"instrument_id": instrument_id, "status": "MONITORING"}
 
 
 @router.post("/feedback", response_model=AiLearningFeedbackResponseSchema)

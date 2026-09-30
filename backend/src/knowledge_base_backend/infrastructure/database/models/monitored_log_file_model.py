@@ -12,3 +12,4 @@ class MonitoredLogFileModel(Base):
     full_context_summary = Column(Text, nullable=False, default="")
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, nullable=False, default="MONITORING")

@@ -16,3 +16,4 @@ class MonitoredLogFile:
     full_context_summary: str
     created_at: datetime
     updated_at: datetime
+    status: str = "MONITORING"

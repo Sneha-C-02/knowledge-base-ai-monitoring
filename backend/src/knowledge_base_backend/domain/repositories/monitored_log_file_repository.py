@@ -1,4 +1,4 @@
-from typing import Protocol, Optional
+from typing import Protocol, Optional, List
 from src.knowledge_base_backend.domain.entities.monitored_log_file import MonitoredLogFile
 
 
@@ -7,4 +7,11 @@ class MonitoredLogFileRepository(Protocol):
     async def update(self, entry: MonitoredLogFile) -> MonitoredLogFile: ...
     async def find_by_instrument_and_filename(
         self, instrument_id: int, filename: str
+    ) -> Optional[MonitoredLogFile]: ...
+    async def find_by_instrument_id(
+        self, instrument_id: int
+    ) -> List[MonitoredLogFile]: ...
+    async def get_all(self) -> List[MonitoredLogFile]: ...
+    async def update_status(
+        self, instrument_id: int, filename: str, status: str
     ) -> Optional[MonitoredLogFile]: ...

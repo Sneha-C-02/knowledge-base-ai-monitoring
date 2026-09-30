@@ -6,6 +6,9 @@ from src.knowledge_base_backend.application.services.keyword_learning_coordinato
 from src.knowledge_base_backend.application.use_cases.analyze_logs_with_memory import AnalyzeLogsWithMemoryUseCase
 from src.knowledge_base_backend.application.use_cases.analyze_uploaded_logs import AnalyzeUploadedLogsUseCase
 from src.knowledge_base_backend.application.use_cases.authenticate_user import AuthenticateUserUseCase
+from src.knowledge_base_backend.application.use_cases.forgot_password import ForgotPasswordUseCase
+from src.knowledge_base_backend.application.use_cases.reset_password import ResetPasswordUseCase
+from src.knowledge_base_backend.application.use_cases.verify_reset_token import VerifyResetTokenUseCase
 from src.knowledge_base_backend.application.use_cases.create_activity import CreateActivityUseCase
 from src.knowledge_base_backend.application.use_cases.discover_failure_keywords import (
     DiscoverFailureKeywordsUseCase,
@@ -288,6 +291,29 @@ class ApplicationContainer(containers.DeclarativeContainer):
         token_service=token_service,
         activity_repository=activity_repository,
         date_time_provider=date_time_provider,
+    )
+
+    forgot_password_use_case = providers.Factory(
+        ForgotPasswordUseCase,
+        user_repository=user_repository,
+        token_service=token_service,
+        activity_repository=activity_repository,
+        date_time_provider=date_time_provider,
+    )
+
+    reset_password_use_case = providers.Factory(
+        ResetPasswordUseCase,
+        user_repository=user_repository,
+        password_hashing_service=password_hashing_service,
+        token_service=token_service,
+        activity_repository=activity_repository,
+        date_time_provider=date_time_provider,
+    )
+
+    verify_reset_token_use_case = providers.Factory(
+        VerifyResetTokenUseCase,
+        user_repository=user_repository,
+        token_service=token_service,
     )
 
     list_knowledge_base_articles_use_case = providers.Factory(

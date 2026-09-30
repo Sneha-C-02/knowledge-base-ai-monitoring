@@ -80,6 +80,126 @@ async def test_investigate_endpoint(override_auth, mock_feedback_repo):
 
 
 @pytest.mark.asyncio
+async def test_investigate_endpoint_broad_error_query(override_auth, mock_feedback_repo):
+    sample_log = (
+        b"Oct 20 10:00:00 [INFO] System initialized\n"
+        b"Oct 20 10:15:00 [CRITICAL] Safety interlock tripped on Pump high pressure\n"
+        b"Oct 20 10:16:00 [INFO] System halted in safe state\n"
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/support/investigate",
+            data={"problem_description": "is there any error"},
+            files=[("logs", ("waters.log", io.BytesIO(sample_log), "text/plain"))],
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["found"] is True
+        assert data["log_file"] == "waters.log"
+        assert data["line_number"] == 2
+        assert data["severity"] == "CRITICAL"
+        assert "Safety interlock tripped on Pump high pressure" in data["matched_line"]
+        assert "error" not in data["matched_line"].lower()
+
+
+@pytest.mark.asyncio
+async def test_investigate_endpoint_clean_log_broad_error_returns_not_found(override_auth, mock_feedback_repo):
+    sample_log = (
+        b"Oct 20 10:00:00 [INFO] System initialized normally\n"
+        b"Oct 20 10:05:00 [INFO] Flow rate stable at 1.00 mL/min\n"
+        b"Oct 20 10:10:00 [INFO] Temperature stable at 35.0 C\n"
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/support/investigate",
+            data={"problem_description": "did an error occur"},
+            files=[("logs", ("clean.log", io.BytesIO(sample_log), "text/plain"))],
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["found"] is False
+        assert data["log_file"] is None
+        assert data["line_number"] is None
+        assert "not found" in data["pre_incident_summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_investigate_endpoint_component_specificity(override_auth, mock_feedback_repo):
+    sample_log = (
+        b"Oct 20 09:00:00 [CRITICAL] EMERGENCY STOP: Safety interlock tripped on Pump high pressure!\n"
+        b"Oct 20 11:20:00 [INFO] Detector diagnostic check started\n"
+        b"Oct 20 11:25:00 [WARNING] Detector optical baseline noise exceeds acquisition limit\n"
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/support/investigate",
+            data={"problem_description": "detector error"},
+            files=[("logs", ("system.log", io.BytesIO(sample_log), "text/plain"))],
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["found"] is True
+        assert data["line_number"] == 3
+        assert "Detector" in data["matched_line"]
+        assert "Pump" not in data["matched_line"]
+
+
+@pytest.mark.asyncio
+async def test_investigate_endpoint_unformatted_error_detected(override_auth, mock_feedback_repo):
+    sample_log = (
+        b"Oct 20 10:00:00 System initialized normally\n"
+        b"Oct 20 10:05:00 Ethernet link disconnected\n"
+        b"Oct 20 10:10:00 Standby mode active\n"
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/support/investigate",
+            data={"problem_description": "is there any error"},
+            files=[("logs", ("comm.log", io.BytesIO(sample_log), "text/plain"))],
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["found"] is True
+        assert data["line_number"] == 2
+        assert "disconnected" in data["matched_line"].lower()
+
+
+@pytest.mark.asyncio
+async def test_investigate_endpoint_clean_log_with_installed_words_returns_not_found(override_auth, mock_feedback_repo):
+    sample_log = (
+        b"Oct 20 10:00:00 [INFO] System boot sequence started\n"
+        b"Oct 20 10:05:00 [INFO] Pump seal reinstalled successfully\n"
+        b"Oct 20 10:10:00 [INFO] Loading default configuration\n"
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/support/investigate",
+            data={"problem_description": "pump error"},
+            files=[("logs", ("maintenance.log", io.BytesIO(sample_log), "text/plain"))],
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["found"] is False
+        assert data["line_number"] is None
+
+
+
+@pytest.mark.asyncio
 async def test_investigate_endpoint_without_files_raises_validation_error(override_auth, mock_feedback_repo):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -188,8 +308,12 @@ async def test_kb_solution_endpoint(override_auth):
         confidence_score=0.92,
     )
 
+    mock_inst_rec = AsyncMock()
+    mock_inst_rec.detect_instrument_name.return_value = "ACQUITY UPLC"
+
     with app.container.hybrid_retrieval_service.override(mock_retrieval), \
-         app.container.answer_generation_service.override(mock_answer_gen):
+         app.container.answer_generation_service.override(mock_answer_gen), \
+         app.container.instrument_recognition_service.override(mock_inst_rec):
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

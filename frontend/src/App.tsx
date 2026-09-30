@@ -33,6 +33,8 @@ function App() {
               <Routes>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/forgot-password" element={<LoginPage initialMode="forgot" />} />
+                <Route path="/reset-password" element={<LoginPage initialMode="reset" />} />
                 
                 <Route element={
                   <ProtectedRoute>

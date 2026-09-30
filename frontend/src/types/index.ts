@@ -154,6 +154,22 @@ export interface KeywordSuggestionsResult {
   suggestions: KeywordSuggestion[];
 }
 
+export interface MonitoredFileInfo {
+  filename: string;
+  status: "MONITORING" | "PAUSED" | "STOPPED" | "ANALYZING" | "READY" | string;
+  total_lines_analyzed: number;
+  last_analyzed_line?: number;
+  updated_at?: string;
+}
+
+export interface InstrumentMonitoringStatus {
+  instrument_id: number;
+  instrument_name?: string;
+  is_active: boolean;
+  status: string;
+  monitored_files: MonitoredFileInfo[];
+}
+
 export interface DashboardResult {
   instrument_id: number;
   instrument_name: string;
@@ -174,6 +190,8 @@ export interface DashboardResult {
   was_log_reduced?: boolean;
   coverage_mode?: "exhaustive" | "fast";
   complete_findings?: DashboardFinding[];
+  monitoring_status?: string;
+  monitored_files?: MonitoredFileInfo[];
 }
 
 export interface InstrumentMemoryEntry {
@@ -348,6 +366,38 @@ export interface AcceptedKeyword {
 export interface AcceptedKeywordsListResponse {
   keywords: AcceptedKeyword[];
   total: number;
+}
+
+// --- Password Reset / User Management ---
+
+export interface ForgotPasswordRequest {
+  username: string;
+}
+
+export interface ForgotPasswordResponse {
+  username: string;
+  reset_token: string;
+  expires_in_minutes: number;
+  message: string;
+}
+
+export interface ResetPasswordRequest {
+  reset_token: string;
+  new_password: string;
+  username?: string;
+}
+
+export interface ResetPasswordResponse {
+  username: string;
+  success: boolean;
+  message: string;
+}
+
+export interface VerifyResetTokenResponse {
+  username: string;
+  valid: boolean;
+  expires_at?: number;
+  message: string;
 }
 
 

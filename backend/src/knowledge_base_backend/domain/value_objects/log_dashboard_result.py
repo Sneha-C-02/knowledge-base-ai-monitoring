@@ -54,3 +54,5 @@ class LogDashboardResult:
     was_log_reduced: bool = False
     coverage_mode: str = "exhaustive"
     complete_findings: List[DashboardFinding] = field(default_factory=list)
+    monitoring_status: str = "MONITORING"
+    monitored_files: List[dict] = field(default_factory=list)

@@ -28,10 +28,10 @@ async def init_db():
         await conn.run_sync(Base.create_all)
         print("Tables created.")
     
-    from passlib.context import CryptContext
+    from src.knowledge_base_backend.infrastructure.authentication.argon2_password_hashing_service import Argon2PasswordHashingService
     from sqlalchemy import select
     
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    hasher = Argon2PasswordHashingService()
     
     async with async_session_factory() as session:
         result = await session.execute(select(UserModel).where(UserModel.username == 'admin'))
@@ -41,7 +41,7 @@ async def init_db():
             new_user = UserModel(
                 username='admin',
                 display_name='Admin User',
-                password_hash=pwd_context.hash('password123'),
+                password_hash=hasher.hash_password('password123'),
                 is_active=True,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)

@@ -1,4 +1,4 @@
-import { Bell, User, LogOut } from 'lucide-react';
+import { Bell, User, LogOut, KeyRound } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSystem } from '../../context/SystemContext';
@@ -54,6 +54,18 @@ export function Header() {
           
           {showDropdown && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-slate-200 py-1">
+              <button 
+                onClick={() => {
+                  setShowDropdown(false);
+                  const currentUsername = user?.username || '';
+                  logout();
+                  navigate(`/forgot-password?username=${encodeURIComponent(currentUsername)}`);
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-b border-slate-100"
+              >
+                <KeyRound size={16} className="text-slate-500" />
+                Reset Password
+              </button>
               <button 
                 onClick={handleLogout}
                 className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-slate-50 flex items-center gap-2"

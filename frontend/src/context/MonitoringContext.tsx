@@ -10,6 +10,8 @@ import type {
 import { useSystem } from "./SystemContext";
 
 type AnalysisMode = "exhaustive" | "fast";
+export type MonitoringSessionStatus = "IDLE" | "ANALYZING" | "MONITORING" | "PAUSED";
+export type MonitoredFileStatus = "READY" | "ANALYZING" | "MONITORING" | "PAUSED";
 
 interface MonitoringContextType {
   logFiles: (File | null)[];
@@ -26,6 +28,7 @@ interface MonitoringContextType {
   refreshKeywordSuggestions: (instrumentId?: number) => Promise<void>;
   analysisMode: AnalysisMode;
   setAnalysisMode: Dispatch<SetStateAction<AnalysisMode>>;
+  activeRunningMode: AnalysisMode | null;
   dateFrom: string;
   setDateFrom: Dispatch<SetStateAction<string>>;
   dateTo: string;
@@ -36,8 +39,13 @@ interface MonitoringContextType {
   keywordError: string | null;
   isLive: boolean;
   isContinuousMonitoringActive: boolean;
+  sessionStatus: MonitoringSessionStatus;
+  fileStatuses: Record<string, MonitoredFileStatus>;
   startContinuousMonitoring: (instrumentId?: number) => void;
   stopContinuousMonitoring: () => void;
+  pauseContinuousMonitoring: () => Promise<void>;
+  resumeContinuousMonitoring: (instrumentId?: number) => Promise<void>;
+  appendLogLines: (filename: string, lines: string) => Promise<void>;
   memory: InstrumentMemoryResponse | null;
   setMemory: Dispatch<SetStateAction<InstrumentMemoryResponse | null>>;
   showMemory: boolean;
@@ -48,7 +56,9 @@ interface MonitoringContextType {
   resetAnalysisResults: () => void;
   clearKeywordResult: () => void;
   addKeywords: (value: string) => void;
-  runCompleteAnalysis: () => Promise<void>;
+  runCompleteAnalysis: (mode?: AnalysisMode) => Promise<void>;
+  runFastAnalysis: () => Promise<void>;
+  runExhaustiveAnalysis: () => Promise<void>;
   runKeywordSearch: () => Promise<void>;
 }
 
@@ -70,6 +80,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const [isLoadingKeywordSuggestions, setIsLoadingKeywordSuggestions] =
     useState(false);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("exhaustive");
+  const [activeRunningMode, setActiveRunningMode] = useState<AnalysisMode | null>(null);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [isMonitoring, setIsMonitoring] = useState(false);
@@ -80,6 +91,8 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   // Continuous monitoring and memory state preserved across routes
   const [isLive, setIsLive] = useState(false);
   const [isContinuousMonitoringActive, setIsContinuousMonitoringActive] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<MonitoringSessionStatus>("IDLE");
+  const [fileStatuses, setFileStatuses] = useState<Record<string, MonitoredFileStatus>>({});
   const [memory, setMemory] = useState<InstrumentMemoryResponse | null>(null);
   const [showMemory, setShowMemory] = useState(false);
   const [isLoadingMemory, setIsLoadingMemory] = useState(false);
@@ -87,8 +100,23 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
 
   const { addActivity, addNotification, updateStats, stats } = useSystem();
 
-  const validFiles = () =>
-    logFiles.filter((file): file is File => file !== null);
+  const validFiles = useCallback(() =>
+    logFiles.filter((file): file is File => file !== null), [logFiles]);
+
+  // Keep fileStatuses synchronized with loaded files
+  useEffect(() => {
+    const files = logFiles.filter((file): file is File => file !== null);
+    setFileStatuses((prev) => {
+      const next: Record<string, MonitoredFileStatus> = {};
+      files.forEach((f) => {
+        next[f.name] = prev[f.name] || "READY";
+      });
+      return next;
+    });
+    if (files.length === 0) {
+      setSessionStatus("IDLE");
+    }
+  }, [logFiles]);
 
   const stopContinuousMonitoring = useCallback(() => {
     if (eventSourceRef.current) {
@@ -97,6 +125,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     }
     setIsLive(false);
     setIsContinuousMonitoringActive(false);
+    setSessionStatus((prev) => (prev === "MONITORING" ? "PAUSED" : prev));
   }, []);
 
   const startContinuousMonitoring = useCallback(
@@ -111,16 +140,51 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
 
       setIsContinuousMonitoringActive(true);
       setIsLive(true);
+      setSessionStatus("MONITORING");
+      setFileStatuses((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((k) => {
+          next[k] = "MONITORING";
+        });
+        return next;
+      });
+
       const es = api.streamDashboard(targetId);
       eventSourceRef.current = es;
 
       es.onopen = () => {
         setIsLive(true);
+        setIsContinuousMonitoringActive(true);
+        setSessionStatus("MONITORING");
       };
 
       es.onmessage = (event) => {
         try {
-          const data: DashboardResult = JSON.parse(event.data);
+          const raw = JSON.parse(event.data);
+          if (raw.type === "MONITORING_ACTIVE" || raw.type === "CONNECTION_ESTABLISHED") {
+            setSessionStatus("MONITORING");
+            setIsLive(true);
+            setIsContinuousMonitoringActive(true);
+            return;
+          }
+          const data: DashboardResult = raw;
+          if (!data.instrument_id) return;
+
+          setSessionStatus("MONITORING");
+          setFileStatuses((prev) => {
+            const next = { ...prev };
+            if (data.monitored_files && data.monitored_files.length) {
+              data.monitored_files.forEach((f) => {
+                next[f.filename] = (f.status as MonitoredFileStatus) || "MONITORING";
+              });
+            } else {
+              validFiles().forEach((f) => {
+                next[f.name] = "MONITORING";
+              });
+            }
+            return next;
+          });
+
           setResult((prev) => {
             if (!prev) return data;
             const existingKeys = new Set(
@@ -148,6 +212,15 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
               ...newBullets,
             ];
 
+            // Safely merge monitored_files by filename so no monitored file is ever lost
+            const prevFilesMap = new Map(
+              (prev.monitored_files || []).map((f) => [f.filename, f])
+            );
+            (data.monitored_files || []).forEach((f) => {
+              prevFilesMap.set(f.filename, f);
+            });
+            const mergedFiles = Array.from(prevFilesMap.values());
+
             return {
               ...data,
               critical_incidents:
@@ -164,11 +237,17 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
                     : "OK",
               complete_findings: mergedFindings,
               daily_summary_bullets: mergedBullets,
-              analyzed_line_count:
-                (prev.analyzed_line_count || 0) +
-                (data.analyzed_line_count || 0),
-              original_line_count:
-                data.original_line_count || prev.original_line_count,
+              analyzed_line_count: Math.max(
+                (prev.analyzed_line_count || 0) + (data.analyzed_line_count || 0),
+                data.analyzed_line_count || 0
+              ),
+              original_line_count: Math.max(
+                prev.original_line_count || 0,
+                data.original_line_count || 0
+              ),
+              monitoring_status: "MONITORING",
+              monitored_files: mergedFiles,
+              files_analyzed: Math.max(prev.files_analyzed, mergedFiles.length),
             };
           });
 
@@ -182,7 +261,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
           addNotification({
             type: notifType,
             title: `Continuous Monitoring: ${data.instrument_name}`,
-            message: `New log lines analyzed. Status: ${data.overall_status}`,
+            message: `New log lines analyzed. Status: MONITORING (${data.overall_status})`,
           });
         } catch (err) {
           console.error("Failed to parse live SSE data", err);
@@ -196,7 +275,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         }
       };
     },
-    [result?.instrument_id, addNotification],
+    [result?.instrument_id, addNotification, validFiles],
   );
 
   const fetchMemory = useCallback(async (instrumentId?: number) => {
@@ -239,8 +318,80 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     setShowMemory(false);
     setError(null);
     setKeywordError(null);
+    setActiveRunningMode(null);
+    setSessionStatus("IDLE");
+    setFileStatuses((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((k) => {
+        next[k] = "READY";
+      });
+      return next;
+    });
   };
 
+  const pauseContinuousMonitoring = useCallback(async () => {
+    if (result?.instrument_id) {
+      try {
+        await api.pauseMonitoring(result.instrument_id);
+      } catch (err) {
+        console.error("Failed to pause monitoring on backend:", err);
+      }
+    }
+    stopContinuousMonitoring();
+    setSessionStatus("PAUSED");
+    setFileStatuses((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        next[key] = "PAUSED";
+      });
+      return next;
+    });
+  }, [result?.instrument_id, stopContinuousMonitoring]);
+
+  const resumeContinuousMonitoring = useCallback(
+    async (instrumentId?: number) => {
+      const targetId = instrumentId || result?.instrument_id;
+      if (targetId) {
+        try {
+          await api.resumeMonitoring(targetId);
+        } catch (err) {
+          console.error("Failed to resume monitoring on backend:", err);
+        }
+      }
+      startContinuousMonitoring(targetId);
+      setSessionStatus("MONITORING");
+      setFileStatuses((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((key) => {
+          next[key] = "MONITORING";
+        });
+        return next;
+      });
+    },
+    [result?.instrument_id, startContinuousMonitoring],
+  );
+
+  const appendLogLines = useCallback(
+    async (filename: string, lines: string) => {
+      if (!result?.instrument_id) return;
+      try {
+        await api.appendLogLines(result.instrument_id, filename, lines);
+        addNotification({
+          type: "info",
+          title: "Lines Appended",
+          message: `Appended new lines to ${filename}. Continuous monitoring active.`,
+        });
+      } catch (err) {
+        console.error("Failed to append lines:", err);
+        addNotification({
+          type: "error",
+          title: "Append Failed",
+          message: "Could not append log lines to the monitored file.",
+        });
+      }
+    },
+    [result?.instrument_id, addNotification],
+  );
 
   const addKeywords = (value: string) => {
     const additions = value
@@ -261,90 +412,6 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     setKeywordInput("");
   };
 
-  const runCompleteAnalysis = async () => {
-    setError(null);
-    const files = validFiles();
-    if (!files.length) {
-      setError("Please select at least one log file to upload.");
-      return;
-    }
-
-    setIsMonitoring(true);
-    setResult(null);
-    addActivity({
-      type: "LOG_FILE_SUBMITTED",
-      message: "Log analysis started",
-      user: "Current User",
-      severity: "INFO",
-      metadata: {
-        filenames: files.map((file) => file.name).join(", "),
-        analysis_mode: analysisMode,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
-      },
-    });
-
-    try {
-      const dashboardResult = await api.analyzeLogs(
-        files,
-        analysisMode,
-        dateFrom || undefined,
-        dateTo || undefined,
-      );
-      setResult(dashboardResult);
-      updateStats({
-        activeLogs: stats.activeLogs + files.length,
-        detectedIssues:
-          stats.detectedIssues +
-          dashboardResult.critical_incidents +
-          dashboardResult.errors,
-      });
-      addNotification({
-        type:
-          dashboardResult.overall_status === "CRITICAL"
-            ? "error"
-            : dashboardResult.overall_status === "WARNING"
-              ? "warning"
-              : "success",
-        title: `AI Dashboard: ${dashboardResult.instrument_name}`,
-        message: `Critical: ${dashboardResult.critical_incidents} | Warnings: ${dashboardResult.warnings} | Errors: ${dashboardResult.errors} | Healthy: ${dashboardResult.healthy_apps}`,
-      });
-      addActivity({
-        type: "MONITORING_COMPLETED",
-        message: `Dashboard analysis completed — ${dashboardResult.overall_status}`,
-        user: "System",
-        severity:
-          dashboardResult.overall_status === "CRITICAL"
-            ? "CRITICAL"
-            : "SUCCESS",
-        metadata: {
-          filenames: files.map((file) => file.name).join(", "),
-          critical: dashboardResult.critical_incidents,
-          warnings: dashboardResult.warnings,
-          errors: dashboardResult.errors,
-        },
-      });
-      // Automatically initiate live continuous line monitoring for this instrument
-      startContinuousMonitoring(dashboardResult.instrument_id);
-      // Pick up any newly learned error-related keywords from this run.
-      refreshKeywordSuggestions(dashboardResult.instrument_id);
-    } catch (requestError) {
-      console.error(requestError);
-      setError(
-        "The analysis result could not be loaded. If you received a completion notification, reopen Log Monitoring or check the API logs.",
-      );
-      addActivity({
-        type: "MONITORING_ERROR",
-        message: "Log analysis result could not be loaded",
-        user: "System",
-        severity: "ERROR",
-        metadata: { filenames: files.map((file) => file.name).join(", ") },
-      });
-    } finally {
-      setIsMonitoring(false);
-    }
-  };
-
   const refreshKeywordSuggestions = useCallback(
     async (instrumentId?: number) => {
       setIsLoadingKeywordSuggestions(true);
@@ -358,6 +425,140 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
       }
     },
     [],
+  );
+
+  const runCompleteAnalysis = useCallback(
+    async (mode?: AnalysisMode) => {
+      setError(null);
+      const files = validFiles();
+      if (!files.length) {
+        setError("Please select at least one log file to upload.");
+        return;
+      }
+
+      const effectiveMode = mode || analysisMode;
+      if (mode && mode !== analysisMode) {
+        setAnalysisMode(mode);
+      }
+
+      setIsMonitoring(true);
+      setActiveRunningMode(effectiveMode);
+      setSessionStatus("ANALYZING");
+      setFileStatuses((prev) => {
+        const next = { ...prev };
+        files.forEach((f) => {
+          next[f.name] = "ANALYZING";
+        });
+        return next;
+      });
+      setResult(null);
+      addActivity({
+        type: "LOG_FILE_SUBMITTED",
+        message: `Log analysis started (${effectiveMode} mode)`,
+        user: "Current User",
+        severity: "INFO",
+        metadata: {
+          filenames: files.map((file) => file.name).join(", "),
+          analysis_mode: effectiveMode,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+        },
+      });
+
+      try {
+        const dashboardResult = await api.analyzeLogs(
+          files,
+          effectiveMode,
+          dateFrom || undefined,
+          dateTo || undefined,
+        );
+        setResult(dashboardResult);
+        setSessionStatus("MONITORING");
+        setFileStatuses((prev) => {
+          const next = { ...prev };
+          files.forEach((f) => {
+            next[f.name] = "MONITORING";
+          });
+          if (dashboardResult.monitored_files) {
+            dashboardResult.monitored_files.forEach((f) => {
+              next[f.filename] = (f.status as MonitoredFileStatus) || "MONITORING";
+            });
+          }
+          return next;
+        });
+        updateStats({
+          activeLogs: stats.activeLogs + files.length,
+          detectedIssues:
+            stats.detectedIssues +
+            dashboardResult.critical_incidents +
+            dashboardResult.errors,
+        });
+        addNotification({
+          type:
+            dashboardResult.overall_status === "CRITICAL"
+              ? "error"
+              : dashboardResult.overall_status === "WARNING"
+                ? "warning"
+                : "success",
+          title: `AI Dashboard: ${dashboardResult.instrument_name}`,
+          message: `Analysis Complete • Status: MONITORING | Critical: ${dashboardResult.critical_incidents} | Warnings: ${dashboardResult.warnings} | Errors: ${dashboardResult.errors}`,
+        });
+        addActivity({
+          type: "MONITORING_COMPLETED",
+          message: `Dashboard analysis completed — ${dashboardResult.overall_status} (Status: MONITORING)`,
+          user: "System",
+          severity:
+            dashboardResult.overall_status === "CRITICAL"
+              ? "CRITICAL"
+              : "SUCCESS",
+          metadata: {
+            filenames: files.map((file) => file.name).join(", "),
+            critical: dashboardResult.critical_incidents,
+            warnings: dashboardResult.warnings,
+            errors: dashboardResult.errors,
+            monitoring_status: "MONITORING",
+          },
+        });
+        // Automatically initiate live continuous line monitoring for this instrument
+        startContinuousMonitoring(dashboardResult.instrument_id);
+        // Pick up any newly learned error-related keywords from this run.
+        refreshKeywordSuggestions(dashboardResult.instrument_id);
+      } catch (requestError) {
+        console.error(requestError);
+        setError(
+          "The analysis result could not be loaded. If you received a completion notification, reopen Log Monitoring or check the API logs.",
+        );
+        setSessionStatus("IDLE");
+        setFileStatuses((prev) => {
+          const next = { ...prev };
+          files.forEach((f) => {
+            next[f.name] = "READY";
+          });
+          return next;
+        });
+        addActivity({
+          type: "MONITORING_ERROR",
+          message: "Log analysis result could not be loaded",
+          user: "System",
+          severity: "ERROR",
+          metadata: { filenames: files.map((file) => file.name).join(", ") },
+        });
+      } finally {
+        setIsMonitoring(false);
+        setActiveRunningMode(null);
+      }
+    },
+    [validFiles, analysisMode, dateFrom, dateTo, addActivity, addNotification, updateStats, stats, startContinuousMonitoring, refreshKeywordSuggestions],
+  );
+
+  const runFastAnalysis = useCallback(
+    () => runCompleteAnalysis("fast"),
+    [runCompleteAnalysis],
+  );
+
+  const runExhaustiveAnalysis = useCallback(
+    () => runCompleteAnalysis("exhaustive"),
+    [runCompleteAnalysis],
   );
 
   const runKeywordSearch = async () => {
@@ -409,6 +610,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         refreshKeywordSuggestions,
         analysisMode,
         setAnalysisMode,
+        activeRunningMode,
         dateFrom,
         setDateFrom,
         dateTo,
@@ -419,8 +621,13 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         keywordError,
         isLive,
         isContinuousMonitoringActive,
+        sessionStatus,
+        fileStatuses,
         startContinuousMonitoring,
         stopContinuousMonitoring,
+        pauseContinuousMonitoring,
+        resumeContinuousMonitoring,
+        appendLogLines,
         memory,
         setMemory,
         showMemory,
@@ -432,6 +639,8 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         clearKeywordResult: () => setKeywordResult(null),
         addKeywords,
         runCompleteAnalysis,
+        runFastAnalysis,
+        runExhaustiveAnalysis,
         runKeywordSearch,
       }}
     >

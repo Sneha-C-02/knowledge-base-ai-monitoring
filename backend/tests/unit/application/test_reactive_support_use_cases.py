@@ -239,3 +239,111 @@ async def test_search_kb_for_incident_use_case():
     assert "Purge the pump" in response.answer
     assert len(response.related_articles) == 1
     assert response.related_articles[0].article_number == "WKB1001"
+
+
+@pytest.mark.asyncio
+async def test_investigate_use_case_broad_error_query_matches_critical():
+    service = LogIncidentInvestigationService()
+    use_case = InvestigateLogIncidentUseCase(investigation_service=service)
+
+    files = [
+        (
+            "empower.log",
+            b"Oct 20 10:00:00 [INFO] Starting run sequence\nOct 20 10:15:00 [CRITICAL] Safety interlock tripped on Pump high pressure\nOct 20 10:16:00 [INFO] System halted\n",
+        )
+    ]
+
+    result = await use_case.execute(files, "did an error occur")
+
+    assert result.found is True
+    assert result.log_file == "empower.log"
+    assert result.line_number == 2
+    assert result.severity == "CRITICAL"
+    assert "Safety interlock tripped on Pump high pressure" in result.matched_line
+
+
+@pytest.mark.asyncio
+async def test_investigate_use_case_broad_error_query_on_clean_logs_returns_not_found():
+    service = LogIncidentInvestigationService()
+    use_case = InvestigateLogIncidentUseCase(investigation_service=service)
+
+    files = [
+        (
+            "clean.log",
+            b"Oct 20 10:00:00 [INFO] System initialized\nOct 20 10:05:00 [INFO] Calibration complete\nOct 20 10:10:00 [INFO] Standby mode active\n",
+        )
+    ]
+
+    result = await use_case.execute(files, "is there any error")
+
+    assert result.found is False
+    assert result.log_file is None
+    assert result.line_number is None
+    assert "not found" in result.pre_incident_summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_investigate_use_case_component_plus_error_specificity():
+    service = LogIncidentInvestigationService()
+    use_case = InvestigateLogIncidentUseCase(investigation_service=service)
+
+    files = [
+        (
+            "pump.log",
+            b"Oct 20 09:00:00 [CRITICAL] EMERGENCY STOP: Safety interlock tripped on Pump high pressure!\n",
+        ),
+        (
+            "detector.log",
+            b"Oct 20 11:20:00 [INFO] Detector online\nOct 20 11:25:00 [WARNING] Detector optical baseline noise exceeds acquisition limit\n",
+        ),
+    ]
+
+    result = await use_case.execute(files, "detector error")
+
+    assert result.found is True
+    assert result.log_file == "detector.log"
+    assert result.line_number == 2
+    assert "Detector" in result.matched_line
+    assert "Pump" not in result.matched_line
+
+
+@pytest.mark.asyncio
+async def test_investigate_use_case_broad_error_with_info_level_failure():
+    service = LogIncidentInvestigationService()
+    use_case = InvestigateLogIncidentUseCase(investigation_service=service)
+
+    files = [
+        (
+            "comm.log",
+            b"Oct 20 10:00:00 [INFO] System boot\nOct 20 10:05:00 [INFO] Ethernet disconnected unexpectedly during run\nOct 20 10:10:00 [INFO] Standby mode active\n",
+        )
+    ]
+
+    result = await use_case.execute(files, "did an error occur")
+    assert result.found is True
+    assert result.log_file == "comm.log"
+    assert result.line_number == 2
+    assert "disconnected" in result.matched_line.lower()
+
+
+@pytest.mark.asyncio
+async def test_investigate_use_case_clean_log_with_installed_words_returns_not_found():
+    service = LogIncidentInvestigationService()
+    use_case = InvestigateLogIncidentUseCase(investigation_service=service)
+
+    files = [
+        (
+            "maintenance.log",
+            b"Oct 20 10:00:00 [INFO] System boot\nOct 20 10:05:00 [INFO] Pump seal reinstalled successfully\nOct 20 10:10:00 [INFO] Loading default configuration\n",
+        )
+    ]
+
+    res_broad = await use_case.execute(files, "is there any error")
+    assert res_broad.found is False
+    assert res_broad.log_file is None
+
+    res_pump = await use_case.execute(files, "pump error")
+    assert res_pump.found is False
+    assert res_pump.log_file is None
+
+

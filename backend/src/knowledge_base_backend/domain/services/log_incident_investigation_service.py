@@ -1,10 +1,8 @@
 import re
-from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
 
 from src.knowledge_base_backend.domain.value_objects.reactive_support_models import (
     IncidentInvestigationResult,
-    IncidentFinding,
     MatchingMajorEvent,
     SystemChangeComparison,
     GroundingEvidence,
@@ -22,13 +20,57 @@ class LogIncidentInvestigationService:
     6. Speed and token-optimized (fast indexing, lazy timestamp detection, compact window extraction).
     """
 
-    # Common stop words to exclude from keyword extraction
+    # Common stop words to exclude from keyword extraction.
+    # Note: "issue" and "problem" are intentionally NOT stop words because they express error intent.
     STOP_WORDS = {
         "the", "is", "at", "which", "on", "and", "a", "an", "in", "to", "for", "with",
-        "of", "by", "from", "as", "about", "my", "our", "their", "user", "chat", "issue",
-        "problem", "mentioned", "system", "please", "why", "what", "when", "where", "how",
+        "of", "by", "from", "as", "about", "my", "our", "their", "user", "chat",
+        "mentioned", "system", "please", "why", "what", "when", "where", "how",
         "does", "not", "have", "has", "had", "can", "could", "would", "should", "there",
-        "been", "being", "this", "that", "these", "those", "into", "after", "before", "over"
+        "been", "being", "this", "that", "these", "those", "into", "after", "before", "over",
+        "did", "occur", "occurred", "happen", "happened", "check", "checking", "any", "are",
+        "were", "was", "show", "tell", "log", "logs", "file", "files", "find", "found",
+        "detected", "reported", "recorded", "observed", "logged", "see", "seen", "search",
+        "you", "anything", "something", "today", "whether", "look", "review", "scan",
+        "inspect", "analyze", "examine", "give", "got", "come", "exist", "indicated",
+    }
+
+    # Conversational, query framing, and filler words for broad error query intent detection
+    BROAD_QUERY_FILLERS = {
+        "a", "about", "after", "all", "also", "am", "an", "analyze", "analyzed",
+        "analyzing", "and", "any", "anyone", "anything", "appear", "appeared",
+        "appearing", "appears", "are", "around", "as", "at", "attempt", "attempted",
+        "attempting", "bad", "be", "been", "before", "being", "both", "by", "came",
+        "can", "chat", "check", "checked", "checking", "checks", "cause", "caused",
+        "causes", "causing", "come", "comes", "coming", "condition", "could", "detail",
+        "details", "detect", "detected", "detecting", "detects", "did", "do",
+        "does", "doing", "done", "during", "each", "either", "entries", "entry",
+        "examine", "examined", "examining", "exist", "existed", "existing",
+        "exists", "explain", "explained", "explaining", "explanation", "file",
+        "files", "find", "finding", "finds", "found", "for", "from", "gave",
+        "get", "gets", "getting", "give", "given", "gives", "giving", "go",
+        "goes", "going", "gone", "got", "had", "happen", "happened", "happening",
+        "happens", "has", "have", "having", "he", "her", "here", "him", "his",
+        "how", "i", "if", "in", "indicate", "indicated", "indicates",
+        "indicating", "info", "information", "inspect", "inspected",
+        "inspecting", "into", "is", "it", "its", "just", "kindly", "line",
+        "lines", "log", "logged", "logging", "logs", "look", "looked",
+        "looking", "looks", "may", "me", "mentioned", "message", "messages",
+        "might", "must", "my", "neither", "no", "not", "now", "observe",
+        "observed", "observes", "observing", "occur", "occurred", "occurring",
+        "occurs", "occurrence", "occurrences", "of", "on", "our", "out", "over",
+        "past", "please", "present", "reason", "reasons", "recent", "recently",
+        "record", "recorded", "recording", "records", "report", "reported",
+        "reporting", "reports", "review", "reviewed", "reviewing", "run", "runlog",
+        "runs", "saw", "scan", "scanned", "scanning", "search", "searched",
+        "searching", "see", "seeing", "seen", "sees", "shall", "she", "should",
+        "show", "showed", "showing", "shown", "shows", "some", "someone",
+        "something", "state", "status", "still", "system", "tell", "telling",
+        "tells", "that", "the", "their", "them", "there", "these", "they",
+        "this", "those", "to", "today", "told", "trace", "up", "us", "user",
+        "was", "we", "went", "were", "what", "when", "where", "whether",
+        "which", "who", "whom", "whose", "why", "will", "with", "would",
+        "yesterday", "you", "your",
     }
 
     # High-impact laboratory instrument components
@@ -36,21 +78,94 @@ class LogIncidentInvestigationService:
         "pump", "detector", "column", "valve", "autosampler", "injector", "lamp",
         "pressure", "flow", "heater", "sensor", "vacuum", "degasser", "solvent",
         "needle", "tray", "seal", "plunger", "baseline", "noise", "drift", "calibration",
-        "communication", "socket", "ethernet", "network", "firmware", "controller",
-        "sample", "vial", "board", "interlock", "temperature", "voltage", "current"
+        "communication", "comm", "conn", "connection", "socket", "ethernet", "network",
+        "firmware", "controller", "sample", "vial", "board", "interlock", "temperature",
+        "temp", "voltage", "current", "motor", "oven", "carousel", "cooler", "leak", "syringe",
+    }
+
+    # Error situation indicators and log markers
+    ERROR_SITUATION_INDICATORS = [
+        "error", "errors", "fail", "failed", "failure", "failures",
+        "exception", "exceptions", "critical", "fatal", "panic", "emergency",
+        "abort", "aborted", "timeout", "timed out", "alarm", "alarms",
+        "interlock", "tripped", "disconnect", "disconnected", "lost",
+        "offline", "unreachable", "refused", "corrupt", "corruption",
+        "leak", "overpressure", "stalled", "stall", "fault", "faults",
+        "crash", "crashed", "breakdown", "breakdowns", "malfunction", "malfunctions",
+    ]
+
+    # Terms expressing error intent
+    ERROR_TERMS = {
+        "error", "errors", "failure", "failures", "fail", "failed", "fails", "failing",
+        "fault", "faults", "exception", "exceptions", "crash", "crashed", "crashes", "crashing",
+        "breakdown", "breakdowns", "abort", "aborted", "aborts", "aborting",
+        "timeout", "timeouts", "timed out", "timed",
+        "malfunction", "malfunctions", "problem", "problems", "issue", "issues",
+        "alarm", "alarms", "incident", "incidents", "anomaly", "anomalies", "wrong",
+        "broken", "break", "broke", "glitch", "glitches",
+    }
+
+    # Compiled regex patterns enforcing word boundaries to eliminate substring false positives (e.g. installed/default)
+    COMPONENT_PATTERN = re.compile(
+        r'\b(?:' + '|'.join(re.escape(c) for c in sorted(KNOWN_COMPONENTS, key=len, reverse=True)) + r')\b',
+        re.IGNORECASE,
+    )
+
+    ERROR_INDICATORS_PATTERN = re.compile(
+        r'\b(?:' + '|'.join(re.escape(i) for i in sorted(ERROR_SITUATION_INDICATORS, key=len, reverse=True)) + r')\b',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def get_matched_components(cls, text: str) -> List[str]:
+        """Return list of distinct known instrument components matched on whole-word boundaries."""
+        matches = cls.COMPONENT_PATTERN.findall(text)
+        return list(dict.fromkeys(m.lower() for m in matches))
+
+    @classmethod
+    def get_matched_error_indicators(cls, text: str) -> List[str]:
+        """Return list of distinct error situation indicators matched on whole-word boundaries."""
+        matches = cls.ERROR_INDICATORS_PATTERN.findall(text)
+        return list(dict.fromkeys(m.lower() for m in matches))
+
+    # Primary instrument subsystems used to isolate components and avoid cross-subsystem hijacking
+    PRIMARY_SUBSYSTEMS = {
+        "pump": ["pump", "plunger", "seal", "fluidic"],
+        "detector": ["detector", "optical", "lamp", "spectrometer"],
+        "column": ["column", "oven", "compartment"],
+        "valve": ["valve", "rotor", "stator"],
+        "autosampler": ["autosampler", "injector", "needle", "tray", "carousel", "vial"],
+        "degasser": ["degasser", "vacuum"],
+        "comm": ["comm", "communication", "socket", "ethernet"],
     }
 
     # Common domain synonyms for chromatography and spectrometry
     DOMAIN_SYNONYMS = {
-        "comm": ["communication", "socket", "connection", "ethernet"],
+        "comm": ["communication", "socket", "connection", "ethernet", "link"],
+        "communication": ["comm", "socket", "connection", "ethernet", "link"],
+        "connection": ["communication", "comm", "socket", "ethernet", "link"],
+        "socket": ["communication", "comm", "connection", "ethernet", "port"],
         "disconnected": ["communication", "lost", "disconnect", "socket"],
         "disconnect": ["communication", "lost", "socket", "timeout"],
-        "leak": ["pressure", "seal", "fluidic", "solvent"],
+        "leak": ["pressure", "seal", "fluidic", "solvent", "droplet"],
         "drift": ["baseline", "detector", "noise", "absorbance"],
         "overpressure": ["pressure", "limit", "exceeded", "pump"],
-        "needle": ["autosampler", "injector", "vial", "sample"],
-        "temp": ["temperature", "heater", "cooler", "thermal"],
+        "needle": ["autosampler", "injector", "vial", "sample", "plunger"],
+        "autosampler": ["injector", "needle", "vial", "sample", "tray", "carousel", "plunger"],
+        "injector": ["autosampler", "needle", "vial", "sample", "tray", "carousel", "plunger"],
+        "column": ["oven", "heater", "compartment", "temperature", "thermal"],
+        "valve": ["switching", "rotor", "stator", "seal", "position"],
+        "degasser": ["vacuum", "pump", "vent", "chamber", "decay"],
+        "vacuum": ["degasser", "pump", "vent", "decay"],
+        "temp": ["temperature", "heater", "cooler", "thermal", "oven"],
+        "temperature": ["temp", "heater", "cooler", "thermal", "oven"],
+        "heater": ["temperature", "thermal", "oven", "temp"],
+        "detector": ["optical", "baseline", "drift", "absorbance", "lamp", "noise", "spectrometer"],
     }
+    # Map all error-related terms to comprehensive error situation indicators
+    for _term in ERROR_TERMS:
+        if _term not in DOMAIN_SYNONYMS:
+            DOMAIN_SYNONYMS[_term] = ERROR_SITUATION_INDICATORS
 
     # Major / Catastrophic event indicators in logs
     MAJOR_EVENT_PATTERNS = [
@@ -59,8 +174,7 @@ class LogIncidentInvestigationService:
         (re.compile(r'\b(?:database[\s_-]*connection[\s_-]*lost|database[\s_-]*corrupt|disk[\s_-]*full)\b', re.IGNORECASE), "Critical Database / Storage Failure"),
         (re.compile(r'\b(?:power[\s_-]*failure|unexpected[\s_-]*restart|hard[\s_-]*reboot|brownout)\b', re.IGNORECASE), "Power Loss / Hardware Reset"),
         (re.compile(r'\b(?:out[\s_-]*of[\s_-]*memory|oom[\s_-]*killer|memory[\s_-]*exhaustion)\b', re.IGNORECASE), "System Out-Of-Memory Exceeded"),
-        (re.compile(r'\b(?:mass[\s_-]*disconnect|all[\s_-]*devices[\s_-]*offline|bus[\s_-]*reset)\b', re.IGNORECASE), "Bus Reset / Device Disconnect Storm"),
-        (re.compile(r'\b(?:fatal[\s_-]*error|catastrophic[\s_-]*abort|system[\s_-]*halted)\b', re.IGNORECASE), "Catastrophic System Abort"),
+        (re.compile(r'\b(?:fatal[\s_-]*error|catastrophic[\s_-]*abort|system[\s_-]*halted[\s_-]*(?:unexpectedly|due[\s_-]*to[\s_-]*error|forcibly))\b', re.IGNORECASE), "Catastrophic System Abort"),
     ]
 
     def __init__(self, ai_answer_service=None) -> None:
@@ -68,8 +182,12 @@ class LogIncidentInvestigationService:
 
     def extract_keywords(self, text: str) -> List[str]:
         """Extract meaningful keywords and domain synonyms from user problem description."""
-        tokens = re.findall(r'[a-zA-Z0-9_\-]+', text.lower())
+        text_lower = text.lower()
+        tokens = re.findall(r'[a-zA-Z0-9_\-]+', text_lower)
         keywords = [t for t in tokens if len(t) > 2 and t not in self.STOP_WORDS]
+        # Check for multi-word domain expressions like "timed out"
+        if "timed out" in text_lower and "timed out" not in keywords:
+            keywords.append("timed out")
         # Expand synonyms
         expanded = list(keywords)
         for kw in keywords:
@@ -114,14 +232,56 @@ class LogIncidentInvestigationService:
         return None
 
     def detect_severity(self, line: str) -> str:
-        """Detect severity of log line with quick case check."""
+        """Detect severity of log line with quick case check and error-situation awareness."""
         upper = line.upper()
-        if "CRITICAL" in upper or "FATAL" in upper or "PANIC" in upper or "EMERGENCY" in upper:
+        # Structured log level tags in brackets or prefix (e.g. [INFO], [ERROR], INFO:)
+        structured_level = None
+        if re.search(r'\[(?:CRITICAL|FATAL|PANIC|EMERGENCY|ALERT)\]|\b(?:CRITICAL|FATAL|PANIC|EMERGENCY|ALERT):', upper):
+            structured_level = "CRITICAL"
+        elif re.search(r'\[(?:ERROR|FAIL|EXCEPTION|ABORT|FAULT)\]|\b(?:ERROR|FAIL|EXCEPTION|ABORT|FAULT):', upper):
+            structured_level = "ERROR"
+        elif re.search(r'\[(?:WARN|WARNING|TIMEOUT|ALARM)\]|\b(?:WARN|WARNING|TIMEOUT|ALARM):', upper):
+            structured_level = "WARNING"
+        elif re.search(r'\[(?:INFO|NOTICE)\]|\b(?:INFO|NOTICE):', upper):
+            structured_level = "INFO"
+        elif re.search(r'\[(?:DEBUG|TRACE)\]|\b(?:DEBUG|TRACE):', upper):
+            structured_level = "DEBUG"
+
+        if structured_level in ("CRITICAL", "ERROR", "WARNING"):
+            return structured_level
+
+        lower = line.lower()
+        if self._is_benign_negation(lower):
+            return structured_level or ("INFO" if "INFO" in upper else "DEBUG")
+
+        # Explicit critical indicators
+        if (
+            re.search(r'\b(?:emergency[\s_-]*stop|safety[\s_-]*interlock[\s_-]*tripped|kernel[\s_-]*panic|bsod|catastrophic)\b', lower)
+            or any(term in upper for term in ("CRITICAL", "FATAL", "PANIC", "EMERGENCY", "ALERT", "INTERLOCK TRIPPED"))
+        ):
             return "CRITICAL"
-        if "ERROR" in upper or "FAIL" in upper or "EXCEPTION" in upper or "ABORT" in upper:
+
+        # Explicit error indicators
+        if (
+            re.search(r'\b(?:error|errors|fail|failed|failure|failures|exception|exceptions|abort|aborted|fault|faults|crash|crashed|malfunction|overpressure|refused|unreachable|disconnected|corrupt|corruption|stalled)\b', lower)
+            or re.search(r'\b(?:err(?:or)?[\s_:-]*[0-9a-fx]+|[0-9]{3,6}|0x[0-9a-f]+)\b', lower)
+            or "communication lost" in lower
+            or "connection lost" in lower
+            or "socket error" in lower
+            or "status=fault" in lower
+        ):
             return "ERROR"
-        if "WARN" in upper or "WARNING" in upper or "TIMEOUT" in upper or "RETRY" in upper:
+
+        # Explicit warning indicators
+        if (
+            re.search(r'\b(?:warn|warning|timeout|timed[\s_-]*out|retry|alarm|alarms|leak|leaks|interlock)\b', lower)
+            or "limit exceeded" in lower
+        ):
             return "WARNING"
+
+        if structured_level:
+            return structured_level
+
         if "INFO" in upper:
             return "INFO"
         return "DEBUG"
@@ -167,6 +327,89 @@ class LogIncidentInvestigationService:
 
         return result
 
+    def _is_broad_error_query(
+        self,
+        problem_description: str,
+        base_keywords: List[str],
+        user_components: List[str],
+        user_time_str: Optional[str],
+        error_codes: List[str],
+    ) -> bool:
+        """Detect whether user query asks broadly about error occurrence without specific subsystem/time."""
+        problem_lower = problem_description.lower()
+
+        # If user explicitly specifies a component, time, or error code, it's specific
+        if user_components or user_time_str or error_codes:
+            return False
+
+        has_error_term = (
+            any(t in self.ERROR_TERMS for t in base_keywords)
+            or any(t in problem_lower for t in self.ERROR_TERMS)
+            or "timed out" in problem_lower
+        )
+        if not has_error_term:
+            return False
+
+        words = re.findall(r'[a-zA-Z0-9_\-]+', problem_lower)
+        non_fillers = [
+            w for w in words
+            if len(w) > 1 and w not in self.ERROR_TERMS and w not in self.BROAD_QUERY_FILLERS
+        ]
+        if non_fillers:
+            return False
+
+        return True
+
+    BENIGN_NEGATION_MARKERS = (
+        "0 error", "0 errors", "no error", "no errors", "zero error", "zero errors", "error-free",
+        "0 failure", "0 failures", "no failure", "no failures", "zero failure", "zero failures",
+        "0 alarm", "0 alarms", "no alarm", "no alarms", "zero alarm", "zero alarms",
+        "0 warning", "0 warnings", "no warning", "no warnings", "zero warning", "zero warnings",
+        "0 fault", "0 faults", "no fault", "no faults", "zero fault", "zero faults",
+        "0 issue", "0 issues", "no issue", "no issues", "zero issue", "zero issues",
+        "0 problem", "0 problems", "no problem", "no problems", "zero problem", "zero problems",
+        "no exceptions", "0 exceptions",
+        "error handling subsystem initialized",
+        "error logging initialized",
+        "error reporting service started",
+        "normal disconnect", "clean disconnect", "graceful disconnect",
+        "disconnect of idle", "disconnect upon batch",
+        "leak sensor test status ok", "status ok", "status: ok", "status = ok",
+        "all self-tests passed", "self-test passed",
+    )
+
+    def _is_benign_negation(self, text_lower: str) -> bool:
+        """Check if log line contains benign negative phrasing (e.g. 0 errors, no alarms) and no genuine failure."""
+        if not any(neg in text_lower for neg in self.BENIGN_NEGATION_MARKERS):
+            return False
+        if re.search(r'\b(?:emergency[\s_-]*stop|safety[\s_-]*interlock[\s_-]*tripped|panic|catastrophic|unhandled[\s_-]*exception)\b', text_lower):
+            return False
+        return True
+
+    def _is_error_situation_line(self, rec: Dict[str, Any]) -> bool:
+        """Check if record represents an error, fault, warning, or error situation indicator (not benign)."""
+        rec_lower = rec["lower"]
+        if self._is_benign_negation(rec_lower):
+            return False
+        if rec["severity"] in ("CRITICAL", "ERROR", "WARNING"):
+            return True
+        if bool(self.get_matched_error_indicators(rec_lower)):
+            return True
+        if re.search(r'\b(?:err(?:or)?[\s_:-]*[0-9a-fx]+|[0-9]{3,6}|0x[0-9a-f]+)\b', rec_lower):
+            return True
+        for regex, _ in self.MAJOR_EVENT_PATTERNS:
+            if regex.search(rec_lower):
+                return True
+        return False
+
+    def _has_log_errors_or_warnings(self, parsed_files: Dict[str, List[Dict[str, Any]]]) -> bool:
+        """Check if parsed log files contain any real errors, faults, or warnings."""
+        for records in parsed_files.values():
+            for rec in records:
+                if self._is_error_situation_line(rec):
+                    return True
+        return False
+
     def investigate_sync(
         self,
         files: List[Tuple[str, str]],
@@ -175,7 +418,7 @@ class LogIncidentInvestigationService:
     ) -> IncidentInvestigationResult:
         """
         Core incident investigation:
-        1. Find file & line matching user problem symptoms.
+        1. Find file & line matching user problem symptoms or broad error intent.
         2. Analyze pre-incident pattern.
         3. Find matching major events (filtered: ONLY if matching the problem).
         4. Detect before vs after system changes.
@@ -217,63 +460,168 @@ class LogIncidentInvestigationService:
             parsed_files[filename] = line_records
             total_lines += len(line_records)
 
-        # 2. Pinpoint target log file and line number
-        best_candidate: Optional[Dict[str, Any]] = None
-        best_score = -1.0
+        # 2. Extract base problem terms & intent
+        base_keywords = [
+            t for t in re.findall(r'[a-zA-Z0-9_\-]+', problem_lower)
+            if len(t) > 2 and t not in self.STOP_WORDS
+        ]
+        if "timed out" in problem_lower and "timed out" not in base_keywords:
+            base_keywords.append("timed out")
 
-        # Check if user mentioned a time in the chat (e.g. "11:28", "10:05")
+        user_components = self.get_matched_components(problem_lower)
+        user_subsystems = [
+            sub for sub, terms in self.PRIMARY_SUBSYSTEMS.items()
+            if any(re.search(r'\b' + re.escape(t) + r'\b', problem_lower) for t in terms)
+        ]
         user_time_match = re.search(r'\b\d{1,2}:\d{2}(?::\d{2})?\b', problem_description)
         user_time_str = user_time_match.group(0) if user_time_match else None
+        error_codes = re.findall(r'\b(?:err(?:or)?[\s_:-]*[0-9a-fx]+|[0-9]{3,6}|0x[0-9a-f]+)\b', problem_lower)
+
+        has_error_intent = (
+            any(t in self.ERROR_TERMS for t in base_keywords)
+            or any(t in problem_lower for t in self.ERROR_TERMS)
+            or "timed out" in problem_lower
+        )
+
+        is_broad_error = self._is_broad_error_query(
+            problem_description=problem_description,
+            base_keywords=base_keywords,
+            user_components=user_components,
+            user_time_str=user_time_str,
+            error_codes=error_codes,
+        )
+
+        # ANTI-HALLUCINATION GUARD:
+        # If user asks broadly about errors and the log files are completely clean, return found=False!
+        if is_broad_error and not self._has_log_errors_or_warnings(parsed_files):
+            return IncidentInvestigationResult(
+                found=False,
+                problem_description=problem_description,
+                pre_incident_summary="The described issue was not found in the uploaded log files.",
+                suggested_search_query=problem_description,
+                files_scanned=len(files),
+                lines_scanned=total_lines,
+                anti_hallucination_verified=True,
+            )
+
+        # 3. Pinpoint target log file and line number
+        best_candidate: Optional[Dict[str, Any]] = None
+        best_score = -1.0
 
         for filename, records in parsed_files.items():
             for rec in records:
                 score = 0.0
                 rec_lower = rec["lower"]
+                rec_severity = rec["severity"]
 
-                # Keyword overlap
-                matched_kw_count = sum(1 for kw in keywords if kw in rec_lower)
-                score += matched_kw_count * 15.0
+                if is_broad_error:
+                    if not self._is_error_situation_line(rec):
+                        continue
 
-                # Direct phrase overlap
-                for i in range(len(keywords) - 1):
-                    phrase = f"{keywords[i]} {keywords[i+1]}"
-                    if phrase in rec_lower:
+                    # Base severity score
+                    if rec_severity == "CRITICAL":
+                        score += 50.0
+                    elif rec_severity == "ERROR":
                         score += 35.0
-
-                # Known component match
-                for comp in self.KNOWN_COMPONENTS:
-                    if comp in problem_lower and comp in rec_lower:
-                        score += 25.0
-
-                # Error code match
-                error_codes = re.findall(r'\b(?:err(?:or)?[\s_:-]*[0-9a-fx]+|[0-9]{3,6}|0x[0-9a-f]+)\b', problem_lower)
-                for code in error_codes:
-                    if code in rec_lower:
-                        score += 45.0
-
-                # User-mentioned time match
-                if user_time_str and user_time_str in rec_lower:
-                    score += 30.0
-
-                # Severity boost (only if there is already topical relevance)
-                if matched_kw_count > 0 or any(c in problem_lower and c in rec_lower for c in self.KNOWN_COMPONENTS):
-                    if rec["severity"] == "CRITICAL":
+                    elif rec_severity == "WARNING":
                         score += 20.0
-                    elif rec["severity"] == "ERROR":
+                    else:
+                        score += 5.0
+
+                    matched_indicators = self.get_matched_error_indicators(rec_lower)
+                    score += min(3, len(matched_indicators)) * 15.0
+
+                    # Major event match boost
+                    for regex, _ in self.MAJOR_EVENT_PATTERNS:
+                        if regex.search(rec_lower):
+                            score += 30.0
+                            break
+
+                    # Error code boost
+                    if re.search(r'\b(?:err(?:or)?[\s_:-]*[0-9a-fx]+|[0-9]{3,6}|0x[0-9a-f]+)\b', rec_lower):
+                        score += 20.0
+
+                    # Hardware component boost
+                    line_components = self.get_matched_components(rec_lower)
+                    if line_components:
                         score += 15.0
-                    elif rec["severity"] == "WARNING":
-                        score += 8.0
+
+                else:
+                    # Specific query scoring
+                    # If user has error intent, disqualify non-error lines
+                    if has_error_intent and not self._is_error_situation_line(rec):
+                        continue
+
+                    # Direct phrase overlap from user query
+                    for i in range(len(base_keywords) - 1):
+                        phrase = f"{base_keywords[i]} {base_keywords[i+1]}"
+                        if phrase in rec_lower:
+                            score += 35.0
+
+                    # Base keyword matching: exact match carries primary weight over indirect synonyms
+                    for bk in base_keywords:
+                        if re.search(r'\b' + re.escape(bk) + r'\b', rec_lower):
+                            score += 35.0
+                        elif any(re.search(r'\b' + re.escape(syn) + r'\b', rec_lower) for syn in self.DOMAIN_SYNONYMS.get(bk, [])):
+                            score += 12.0
+                        elif bk in self.ERROR_TERMS and bool(self.get_matched_error_indicators(rec_lower)):
+                            score += 10.0
+
+                    # Known component matches
+                    for comp in user_components:
+                        if re.search(r'\b' + re.escape(comp) + r'\b', rec_lower):
+                            score += 25.0
+
+                    # Primary subsystem specificity & competing subsystem penalty
+                    if user_subsystems:
+                        matched_user_sub = any(
+                            any(re.search(r'\b' + re.escape(t) + r'\b', rec_lower) for t in self.PRIMARY_SUBSYSTEMS[sub])
+                            for sub in user_subsystems
+                        )
+                        if matched_user_sub:
+                            score += 35.0
+                        else:
+                            competing = any(
+                                any(re.search(r'\b' + re.escape(t) + r'\b', rec_lower) for t in terms)
+                                for sub, terms in self.PRIMARY_SUBSYSTEMS.items()
+                                if sub not in user_subsystems
+                            )
+                            if competing:
+                                score -= 50.0
+
+                    # Error code match
+                    for code in error_codes:
+                        if code in rec_lower:
+                            score += 45.0
+
+                    # User-mentioned time match
+                    if user_time_str and user_time_str in rec_lower:
+                        score += 40.0
+
+                    # Severity boost
+                    if has_error_intent:
+                        if rec_severity == "CRITICAL":
+                            score += 25.0
+                        elif rec_severity == "ERROR":
+                            score += 20.0
+                        elif rec_severity == "WARNING":
+                            score += 10.0
+                    else:
+                        if rec_severity == "CRITICAL":
+                            score += 15.0
+                        elif rec_severity == "ERROR":
+                            score += 10.0
+                        elif rec_severity == "WARNING":
+                            score += 5.0
 
                 # Feedback-driven weights from past user verification
-                # Check specific file:line adjustments
                 line_key = f"{rec['file']}:{rec['line']}"
                 if line_key in weights:
                     score += weights[line_key]
 
-                # Check keyword and pattern term weights
                 for term, weight in weights.items():
                     if ":" in term:
-                        continue  # Skip line_key strings
+                        continue
                     if term in rec_lower:
                         score += weight * 10.0
 
@@ -310,7 +658,7 @@ class LogIncidentInvestigationService:
                 target_idx = i
                 break
 
-        # 3. Analyze pre-incident pattern & incident before the mentioned issue (bounded window)
+        # 4. Analyze pre-incident pattern & incident before the mentioned issue (bounded window)
         pre_window_start = max(0, target_idx - 35)
         pre_records = target_records[pre_window_start:target_idx]
 
@@ -325,14 +673,14 @@ class LogIncidentInvestigationService:
             problem_description=problem_description,
         )
 
-        # 4. Detect major system events across all logs (ONLY IF MATCHING THE PROBLEM)
+        # 5. Detect major system events across all logs (ONLY IF MATCHING THE PROBLEM)
         major_events = self._detect_matching_major_events(
             parsed_files=parsed_files,
             incident_record=best_candidate,
             problem_description=problem_description,
         )
 
-        # 5. Detect system changes (After Incident vs Before Incident)
+        # 6. Detect system changes (After Incident vs Before Incident)
         post_window_end = min(len(target_records), target_idx + 26)
         post_records = target_records[target_idx + 1:post_window_end]
 
@@ -346,7 +694,7 @@ class LogIncidentInvestigationService:
             post_records=post_records,
         )
 
-        # 6. Anti-Hallucination Grounding Validator
+        # 7. Anti-Hallucination Grounding Validator
         grounding_citations, confidence_score = self._validate_grounding(
             target_file=target_file,
             target_line=target_line,
@@ -354,13 +702,17 @@ class LogIncidentInvestigationService:
             pre_records=pre_records,
             major_events=major_events,
             problem_keywords=keywords,
+            base_keywords=base_keywords,
+            is_broad_error=is_broad_error,
         )
 
-        # 7. Generate suggested search query for the KB button
+        # 8. Generate suggested search query for the KB button
         suggested_kb_query = self._generate_suggested_kb_query(
             problem_description=problem_description,
             best_candidate=best_candidate,
             pre_pattern=pre_incident_pattern,
+            is_broad_error=is_broad_error,
+            base_keywords=base_keywords,
         )
 
         return IncidentInvestigationResult(
@@ -569,10 +921,7 @@ class LogIncidentInvestigationService:
         incident_lower = incident_record["text"].lower()
 
         # Identify key components in problem or incident
-        relevant_components = {
-            comp for comp in self.KNOWN_COMPONENTS
-            if comp in problem_lower or comp in incident_lower
-        }
+        relevant_components = set(self.get_matched_components(problem_lower)) | set(self.get_matched_components(incident_lower))
 
         # Check if user problem explicitly describes a catastrophic system failure
         is_problem_asking_catastrophe = any(
@@ -615,7 +964,7 @@ class LogIncidentInvestigationService:
                 # 1. Component correlation
                 shared_component = None
                 for comp in relevant_components:
-                    if comp in rec_lower:
+                    if re.search(r'\b' + re.escape(comp) + r'\b', rec_lower):
                         shared_component = comp
                         break
 
@@ -704,7 +1053,10 @@ class LogIncidentInvestigationService:
         )
 
         # 3. Component Flow / Instrument Execution Mode
-        post_aborts = [r for r in post_records if any(term in r["lower"] for term in ("abort", "halt", "stop", "fault", "paused"))]
+        post_aborts = [
+            r for r in post_records
+            if re.search(r'\b(?:abort|aborted|halt|halted|stop|stopped|fault|paused)\b', r["lower"])
+        ]
         if post_aborts:
             changes.append(
                 SystemChangeComparison(
@@ -737,6 +1089,8 @@ class LogIncidentInvestigationService:
         pre_records: List[Dict[str, Any]],
         major_events: List[MatchingMajorEvent],
         problem_keywords: List[str],
+        base_keywords: Optional[List[str]] = None,
+        is_broad_error: bool = False,
     ) -> Tuple[List[GroundingEvidence], float]:
         """
         Anti-hallucination technique: verify that every piece of evidence corresponds
@@ -777,10 +1131,31 @@ class LogIncidentInvestigationService:
                 )
             )
 
-        # Calculate confidence score based on objective keyword density
+        # Calculate confidence score based on objective keyword and intent density
         matched_lower = matched_text.lower()
-        kw_density = sum(1 for kw in problem_keywords if kw in matched_lower) / max(1, len(problem_keywords))
-        score = 0.65 + (min(kw_density, 1.0) * 0.25)
+        if is_broad_error:
+            # Broad error inquiry accurately grounded to a confirmed error/critical log incident
+            score = 0.88
+            if any(ev.event_type for ev in major_events):
+                score += 0.05
+        else:
+            effective_base = base_keywords if base_keywords else [
+                kw for kw in problem_keywords if kw not in self.ERROR_SITUATION_INDICATORS
+            ]
+            if not effective_base:
+                effective_base = problem_keywords[:5]
+
+            matched_base = 0
+            for bk in effective_base:
+                if re.search(r'\b' + re.escape(bk) + r'\b', matched_lower):
+                    matched_base += 1
+                elif any(re.search(r'\b' + re.escape(syn) + r'\b', matched_lower) for syn in self.DOMAIN_SYNONYMS.get(bk, [])):
+                    matched_base += 1
+                elif bk in self.ERROR_TERMS and bool(self.get_matched_error_indicators(matched_lower)):
+                    matched_base += 1
+
+            kw_density = matched_base / max(1, len(effective_base))
+            score = 0.65 + (min(kw_density, 1.0) * 0.25)
 
         # Pre-incident verification bonus
         if len(citations) >= 2:
@@ -794,15 +1169,28 @@ class LogIncidentInvestigationService:
         problem_description: str,
         best_candidate: Dict[str, Any],
         pre_pattern: str,
+        is_broad_error: bool = False,
+        base_keywords: Optional[List[str]] = None,
     ) -> str:
         """Formulate high-precision search query for the KB button."""
-        tokens = self.extract_keywords(problem_description)
         cand_lower = best_candidate["text"].lower()
 
-        extra_terms = []
-        for comp in self.KNOWN_COMPONENTS:
-            if comp in cand_lower and comp not in tokens:
-                extra_terms.append(comp)
+        line_components = self.get_matched_components(cand_lower)
+        line_error_codes = re.findall(r'\b(?:err(?:or)?[\s_:-]*[0-9a-fx]+|[0-9]{3,6}|0x[0-9a-f]+)\b', cand_lower)
 
-        query_parts = tokens[:5] + extra_terms[:2]
-        return " ".join(query_parts) if query_parts else problem_description
+        if is_broad_error:
+            cand_tokens = [
+                t for t in re.findall(r'[a-zA-Z0-9_\-]+', cand_lower)
+                if len(t) > 2 and t not in self.STOP_WORDS and not t.isdigit() and t not in ("info", "debug")
+            ]
+            parts = line_components + line_error_codes + [t for t in cand_tokens if t not in line_components][:3]
+            query = " ".join(dict.fromkeys(parts))
+            return query if query else problem_description
+
+        base_tokens = base_keywords if base_keywords is not None else [
+            t for t in re.findall(r'[a-zA-Z0-9_\-]+', problem_description.lower())
+            if len(t) > 2 and t not in self.STOP_WORDS
+        ]
+        extra_terms = [comp for comp in line_components if comp not in base_tokens]
+        query_parts = base_tokens[:5] + extra_terms[:2] + line_error_codes[:1]
+        return " ".join(dict.fromkeys(query_parts)) if query_parts else problem_description

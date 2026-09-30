@@ -46,6 +46,13 @@ class DashboardFindingSchema(BaseModel):
     suggested_search_query: Optional[str] = None
 
 
+class MonitoredFileSchema(BaseModel):
+    filename: str
+    status: str = "MONITORING"
+    total_lines_analyzed: int = 0
+    updated_at: Optional[str] = None
+
+
 class LogDashboardResponse(BaseModel):
     instrument_id: int
     instrument_name: str
@@ -68,6 +75,30 @@ class LogDashboardResponse(BaseModel):
     complete_findings: List[DashboardFindingSchema] = Field(default_factory=list)
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    monitoring_status: str = "MONITORING"
+    monitored_files: List[MonitoredFileSchema] = Field(default_factory=list)
+
+
+class InstrumentMonitoringStatusResponse(BaseModel):
+    instrument_id: int
+    instrument_name: Optional[str] = None
+    is_active: bool = True
+    status: str = "MONITORING"
+    monitored_files: List[MonitoredFileSchema] = Field(default_factory=list)
+
+
+class AppendLogLinesRequest(BaseModel):
+    instrument_id: int
+    filename: str
+    lines: str
+
+
+class AppendLogLinesResponse(BaseModel):
+    instrument_id: int
+    filename: str
+    lines_appended: int
+    total_lines: int
+    status: str = "MONITORING"
 
 
 

@@ -21,6 +21,10 @@ import type {
   AcceptedKeyword,
   AcceptedKeywordsListResponse,
   RejectKeywordRequest,
+  ForgotPasswordResponse,
+  ResetPasswordResponse,
+  VerifyResetTokenResponse,
+  InstrumentMonitoringStatus,
 } from "../types";
 
 
@@ -58,8 +62,8 @@ class ApiClient {
       });
 
       if (!response.ok) {
-        // Industry-level interceptor: Handle 401 Unauthorized globally
-        if (response.status === 401) {
+        // Industry-level interceptor: Handle 401 Unauthorized globally for protected routes
+        if (response.status === 401 && !endpoint.startsWith("/auth/")) {
           localStorage.removeItem("auth_token");
           if (window.location.pathname !== "/login") {
             window.location.href = "/login"; // Force redirect to login
@@ -89,7 +93,7 @@ class ApiClient {
     }
   }
 
-  // --- Auth ---
+  // --- Auth & User Management ---
   async login(
     username: string,
     password: string,
@@ -97,6 +101,35 @@ class ApiClient {
     return this.fetch<{ token: string; user: User }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
+    });
+  }
+
+  async forgotPassword(username: string): Promise<ForgotPasswordResponse> {
+    return this.fetch<ForgotPasswordResponse>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ username }),
+    });
+  }
+
+  async resetPassword(
+    resetToken: string,
+    newPassword: string,
+    username?: string,
+  ): Promise<ResetPasswordResponse> {
+    return this.fetch<ResetPasswordResponse>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({
+        reset_token: resetToken,
+        new_password: newPassword,
+        username,
+      }),
+    });
+  }
+
+  async verifyResetToken(resetToken: string): Promise<VerifyResetTokenResponse> {
+    return this.fetch<VerifyResetTokenResponse>("/auth/verify-reset-token", {
+      method: "POST",
+      body: JSON.stringify({ reset_token: resetToken }),
     });
   }
 
@@ -307,6 +340,63 @@ class ApiClient {
   streamDashboard(instrumentId: number): EventSource {
     return new EventSource(
       `${API_BASE_URL}/monitoring/dashboard/stream/${instrumentId}`,
+    );
+  }
+
+  /** Get active continuous monitoring status and monitored files for an instrument */
+  async getMonitoringStatus(
+    instrumentId: number,
+  ): Promise<InstrumentMonitoringStatus> {
+    return this.fetch<InstrumentMonitoringStatus>(
+      `/monitoring/dashboard/status/${instrumentId}`,
+    );
+  }
+
+  /** Append new lines to a monitored log file and trigger immediate analysis */
+  async appendLogLines(
+    instrumentId: number,
+    filename: string,
+    lines: string,
+  ): Promise<{
+    instrument_id: number;
+    filename: string;
+    lines_appended: number;
+    total_lines: number;
+    status: string;
+  }> {
+    return this.fetch<{
+      instrument_id: number;
+      filename: string;
+      lines_appended: number;
+      total_lines: number;
+      status: string;
+    }>("/monitoring/dashboard/append-lines", {
+      method: "POST",
+      body: JSON.stringify({
+        instrument_id: instrumentId,
+        filename,
+        lines,
+      }),
+    });
+  }
+
+  /** Pause continuous monitoring for an instrument */
+  async pauseMonitoring(
+    instrumentId: number,
+  ): Promise<{ instrument_id: number; status: string }> {
+    return this.fetch<{ instrument_id: number; status: string }>(
+      `/monitoring/dashboard/pause/${instrumentId}`,
+      { method: "POST" },
+    );
+  }
+
+  /** Resume continuous monitoring for an instrument */
+  async resumeMonitoring(
+    instrumentId: number,
+  ): Promise<{ instrument_id: number; status: string }> {
+    return this.fetch<{ instrument_id: number; status: string }>(
+      `/monitoring/dashboard/resume/${instrumentId}`,
+      { method: "POST" },
     );
   }
 
