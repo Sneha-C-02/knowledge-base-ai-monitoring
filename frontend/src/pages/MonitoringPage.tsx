@@ -168,14 +168,10 @@ export function MonitoringPage() {
     isKeywordSearching,
     error,
     keywordError,
-    activeRunningMode,
     isLive,
-    isContinuousMonitoringActive,
-    sessionStatus,
-    fileStatuses,
-    pauseContinuousMonitoring,
-    resumeContinuousMonitoring,
-    appendLogLines: _appendLogLines,
+    isContinuousMonitoringActive: _isContinuousMonitoringActive,
+    startContinuousMonitoring,
+    stopContinuousMonitoring,
     memory,
     showMemory,
     isLoadingMemory,
@@ -183,8 +179,7 @@ export function MonitoringPage() {
     resetAnalysisResults,
     clearKeywordResult,
     addKeywords,
-    runFastAnalysis,
-    runExhaustiveAnalysis,
+    runCompleteAnalysis,
     runKeywordSearch,
   } = useMonitoring();
 
@@ -409,67 +404,53 @@ export function MonitoringPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {sessionStatus === "ANALYZING" && (
-            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg shadow-xs">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
-              </span>
-              <span className="text-xs font-semibold text-blue-800">
-                Status: ANALYZING ({activeRunningMode === "fast" ? "Fast Sampled" : "Exhaustive"})
-              </span>
-            </div>
-          )}
+          {result && (
+            <>
+              {isLive ? (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg shadow-xs">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-xs font-semibold text-emerald-800">
+                    Continuous Monitoring Active
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={stopContinuousMonitoring}
+                    className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 ml-1.5 bg-white"
+                  >
+                    Stop Monitoring
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg shadow-xs">
+                  <span className="h-2.5 w-2.5 rounded-full bg-slate-400"></span>
+                  <span className="text-xs font-semibold text-slate-700">
+                    Monitoring Paused
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => startContinuousMonitoring(result.instrument_id)}
+                    className="h-7 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 ml-1.5 bg-white"
+                  >
+                    Resume Monitoring
+                  </Button>
+                </div>
+              )}
 
-          {(sessionStatus === "MONITORING" || isLive || (result && result.monitoring_status === "MONITORING")) && (
-            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg shadow-xs">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-semibold text-emerald-800">
-                Status: MONITORING (Live continuous inspection)
-              </span>
               <Button
                 variant="outline"
-                size="sm"
-                onClick={pauseContinuousMonitoring}
-                className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 ml-1.5 bg-white"
+                onClick={handleViewMemory}
+                className="text-sm"
+                isLoading={isLoadingMemory}
               >
-                Pause Monitoring
+                <History size={16} className="mr-2" />{" "}
+                {showMemory ? "Hide History" : "View Analysis History"}
               </Button>
-            </div>
-          )}
-
-          {sessionStatus === "PAUSED" && (
-            <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg shadow-xs">
-              <span className="h-2.5 w-2.5 rounded-full bg-slate-400"></span>
-              <span className="text-xs font-semibold text-slate-700">
-                Status: Monitoring Paused
-              </span>
-              {result && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => resumeContinuousMonitoring(result.instrument_id)}
-                  className="h-7 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 ml-1.5 bg-white"
-                >
-                  Resume Monitoring
-                </Button>
-              )}
-            </div>
-          )}
-
-          {result && (
-            <Button
-              variant="outline"
-              onClick={handleViewMemory}
-              className="text-sm"
-              isLoading={isLoadingMemory}
-            >
-              <History size={16} className="mr-2" />{" "}
-              {showMemory ? "Hide History" : "View Analysis History"}
-            </Button>
+            </>
           )}
         </div>
       </div>
@@ -611,11 +592,6 @@ export function MonitoringPage() {
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                     {validSelectedFiles.map((file, index) => {
                       const relPath = (file as unknown as { webkitRelativePath?: string }).webkitRelativePath;
-                      const fileStatus = fileStatuses[file.name] || (
-                        sessionStatus === "MONITORING" ? "MONITORING" :
-                        sessionStatus === "ANALYZING" ? "ANALYZING" :
-                        sessionStatus === "PAUSED" ? "PAUSED" : "READY"
-                      );
                       return (
                         <div
                           key={`${file.name}-${index}`}
@@ -630,41 +606,15 @@ export function MonitoringPage() {
                               ({formatFileSize(file.size)})
                             </span>
                           </div>
-
-                          <div className="flex items-center gap-2 shrink-0 ml-2">
-                            {fileStatus === "MONITORING" && (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-2xs">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                MONITORING
-                              </span>
-                            )}
-                            {fileStatus === "ANALYZING" && (
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
-                                ANALYZING
-                              </span>
-                            )}
-                            {fileStatus === "PAUSED" && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                                PAUSED
-                              </span>
-                            )}
-                            {fileStatus === "READY" && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                                READY
-                              </span>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveSingleFile(index)}
-                              disabled={isMonitoring || isKeywordSearching}
-                              className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-slate-100 transition-colors"
-                              title="Remove file"
-                            >
-                              <X size={15} />
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSingleFile(index)}
+                            disabled={isMonitoring || isKeywordSearching}
+                            className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-slate-100 transition-colors shrink-0 ml-2"
+                            title="Remove file"
+                          >
+                            <X size={15} />
+                          </button>
                         </div>
                       );
                     })}
@@ -838,51 +788,35 @@ export function MonitoringPage() {
             <div className="border-t border-slate-200 pt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <p className="text-sm font-semibold text-slate-800">
-                  Continuous file analysis
+                  Complete file analysis
                 </p>
                 <div className="mt-2 flex gap-4 text-sm text-slate-600">
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={analysisMode === "fast"}
-                      onChange={() => setAnalysisMode("fast")}
-                      disabled={isMonitoring || isKeywordSearching}
-                    />{" "}
-                    Fast sampled
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer">
+                  <label className="flex items-center gap-1.5">
                     <input
                       type="radio"
                       checked={analysisMode === "exhaustive"}
                       onChange={() => setAnalysisMode("exhaustive")}
-                      disabled={isMonitoring || isKeywordSearching}
                     />{" "}
                     Exhaustive (all lines)
                   </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      checked={analysisMode === "fast"}
+                      onChange={() => setAnalysisMode("fast")}
+                    />{" "}
+                    Fast sampled
+                  </label>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={runFastAnalysis}
-                  isLoading={isMonitoring && activeRunningMode === "fast"}
-                  disabled={isMonitoring || isKeywordSearching || validSelectedFiles.length === 0}
-                  className="border-primary-300 text-primary-700 hover:bg-primary-50"
-                  title="Run fast sampled analysis and start continuous monitoring"
-                >
-                  <Zap size={16} className="mr-1.5 text-amber-500" /> Fast Sampled
-                </Button>
-                <Button
-                  type="button"
-                  onClick={runExhaustiveAnalysis}
-                  isLoading={isMonitoring && activeRunningMode === "exhaustive"}
-                  disabled={isMonitoring || isKeywordSearching || validSelectedFiles.length === 0}
-                  title="Run exhaustive analysis and start continuous monitoring"
-                >
-                  <Play size={16} className="mr-1.5" /> Exhaustive Analysis
-                </Button>
-              </div>
+              <Button
+                type="button"
+                onClick={runCompleteAnalysis}
+                isLoading={isMonitoring}
+                disabled={isKeywordSearching}
+              >
+                <Play size={18} className="mr-2" /> Run Complete Analysis
+              </Button>
             </div>
           </div>
           {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
@@ -909,21 +843,10 @@ export function MonitoringPage() {
                     <div className="flex items-center gap-4">
                       {getStatusIcon(result.overall_status)}
                       <div>
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
                           <h2 className="text-xl font-bold">
                             {result.instrument_name}
                           </h2>
-                          {(sessionStatus === "MONITORING" || result.monitoring_status === "MONITORING" || isContinuousMonitoringActive) && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                              STATUS: MONITORING
-                            </span>
-                          )}
-                          {sessionStatus === "PAUSED" && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-                              STATUS: PAUSED
-                            </span>
-                          )}
                           {isLive && (
                             <span className="flex items-center text-xs font-medium text-red-600 bg-red-100 px-2 py-0.5 rounded-full animate-pulse">
                               <Radio size={12} className="mr-1" /> LIVE
@@ -947,23 +870,6 @@ export function MonitoringPage() {
                               </span>
                             )}
                         </p>
-                        {result.monitored_files && result.monitored_files.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                            <span className="text-[11px] font-medium text-slate-600 mr-1">Monitored Files:</span>
-                            {result.monitored_files.map((mf) => (
-                              <span
-                                key={mf.filename}
-                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono bg-white/90 border border-slate-200 text-slate-700 shadow-2xs"
-                              >
-                                <span className={`w-1.5 h-1.5 rounded-full ${mf.status === 'PAUSED' ? 'bg-amber-400' : 'bg-emerald-500 animate-pulse'}`} />
-                                {mf.filename}
-                                <span className="text-[10px] text-slate-400">
-                                  ({(mf.total_lines_analyzed ?? mf.last_analyzed_line ?? 0).toLocaleString()} lines)
-                                </span>
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     </div>
                     <Badge
@@ -1149,6 +1055,7 @@ export function MonitoringPage() {
                   <p className="text-xs text-slate-500 mt-1">
                     {result.analyzed_line_count?.toLocaleString() ?? 0} of{" "}
                     {result.original_line_count?.toLocaleString() ?? 0} lines
+                    analyzed • AI pinpointed issue lines, simple explanations & pre-incident sequences
                     analyzed • AI pinpointed issue lines, AI summaries & pre-incident sequences
                   </p>
                 </CardHeader>
